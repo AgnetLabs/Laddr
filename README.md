@@ -48,52 +48,42 @@ Pre-defined, predictable pipelines where tasks flow through agents in a fixed se
 
 ---
 
-## Features
+## ✨ Features
 
-<table>
-<tr>
-<td width="50%">
-
-### **Scalability**
-- **Horizontal scaling** — Scale each agent independently
-- **Multi-worker support** — Run multiple workers per agent
-- **Load balancing** — Automatic via Redis Streams
+### 🚀 Scalability & Performance
+- **Horizontal scaling** — Scale each agent independently based on workload
+- **Multi-worker support** — Run multiple workers per agent for high throughput
+- **Automatic load balancing** — Redis Streams distribute tasks across workers
 - **Fault tolerance** — Worker failures don't stop the system
 
-### **Developer Experience**
-- **Clean CLI** — Minimal, modern interface
-- **Type safety** — Full Python type hints
-- **Simple setup** — One command to scaffold projects
+### 📊 Observability & Monitoring
+- **Complete tracing** — Every agent action automatically logged to PostgreSQL
+- **Real-time metrics** — Job status, duration, success rates, queue depth
+- **Interactive dashboard** — Beautiful UI to monitor agents, traces, and logs
+- **Playground** — Test agents interactively with live streaming responses
 
-### **Extensibility**
-- **Custom tools** — Add any Python function as a tool
-- **LLM agnostic** — Works with Gemini, OpenAI, Anthropic, Groq, local models
-- **Pluggable backends** — Swap Redis, Postgres, storage providers
+### 🔧 Developer Experience
+- **Clean CLI** — Minimal, modern interface for project management
+- **Hot reload** — Code changes reflect instantly in development mode
+- **Type safety** — Full Python type hints throughout the codebase
+- **Simple setup** — One command (`laddr init`) to scaffold complete projects
 
-</td>
-<td width="50%">
+### 🎯 AI-Optimized Architecture
+- **Built-in delegation** — Agents can delegate tasks to other agents seamlessly
+- **Parallel execution** — Process multiple independent tasks simultaneously
+- **Context management** — Automatic artifact storage for large payloads (>1MB)
+- **Smart retries** — Configurable retry logic and timeout handling per agent
 
-### **Observability**
-- **Complete tracing** — Every agent action logged to Postgres
-- **Real-time metrics** — Job status, duration, success rates
-- **Interactive dashboard** — Monitor agents, traces, logs in one UI
-- **Playground** — Test agents with live feedback
+### 🐳 Production Ready
+- **Docker native** — Everything runs in containers with docker-compose
+- **Queue-based messaging** — Redis Streams for reliable, distributed communication
+- **Artifact storage** — MinIO/S3 for handling large files and documents
+- **REST API** — FastAPI server with auto-generated OpenAPI documentation
 
-### **Production Ready**
-- **Docker native** — Everything containerized
-- **Queue-based** — Redis Streams for reliable messaging
-- **Artifact storage** — MinIO/S3 for large payloads
-- **REST API** — FastAPI server with auto-generated docs
-
-### **AI-Optimized**
-- **Delegation tools** — Built-in agent-to-agent communication
-- **Parallel execution** — Process multiple tasks simultaneously
-- **Context management** — Automatic artifact storage for large data
-- **Smart retries** — Configurable retry logic per agent
-
-</td>
-</tr>
-</table>
+### 🔌 Extensibility
+- **Custom tools** — Add any Python function as an agent tool with `@tool` decorator
+- **LLM agnostic** — Works with Gemini, OpenAI, Anthropic, Groq, and local models
+- **Pluggable backends** — Swap Redis, PostgreSQL, or storage providers easily
 
 ---
 

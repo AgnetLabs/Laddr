@@ -1,0 +1,149 @@
+# Laddr Environment Configuration
+# ===================================
+# Complete reference for all available environment variables.
+# Uncomment and set the ones you need for your project.
+
+# ===================================
+# Infrastructure Backends
+# ===================================
+
+# Database Configuration
+DATABASE_URL=postgresql://laddr:laddr@postgres:5432/laddr
+# For SQLite (local development):
+# DATABASE_URL=sqlite:///./laddr.db
+
+# Message Broker
+REDIS_URL=redis://redis:6379
+# KAFKA_BOOTSTRAP=localhost:9092
+
+# ===================================
+# Storage Backend (S3-Compatible)
+# ===================================
+# Supports AWS S3, MinIO, DigitalOcean Spaces, Cloudflare R2, etc.
+# For AWS S3: set STORAGE_ENDPOINT=s3.amazonaws.com, STORAGE_SECURE=true, STORAGE_REGION=us-east-1
+# For MinIO: set STORAGE_ENDPOINT=minio:9000 or localhost:9000, STORAGE_SECURE=false
+# See STORAGE_MIGRATION_GUIDE.md for detailed instructions
+
+# New storage configuration (recommended):
+# STORAGE_ENDPOINT=s3.amazonaws.com
+# STORAGE_ACCESS_KEY=your-access-key-id
+# STORAGE_SECRET_KEY=your-secret-access-key
+# STORAGE_SECURE=true
+# STORAGE_REGION=us-east-1
+# STORAGE_BUCKET=laddr
+
+# MinIO configuration:
+STORAGE_ENDPOINT=minio:9000
+STORAGE_ACCESS_KEY=minioadmin
+STORAGE_SECRET_KEY=minioadmin123
+STORAGE_SECURE=false
+# STORAGE_BUCKET=laddr
+
+# Large Response Storage
+# Automatically offload large responses to storage backend
+# ENABLE_LARGE_RESPONSE_STORAGE=true
+STORAGE_THRESHOLD_KB=100
+
+# ===================================
+# API Server
+# ===================================
+API_HOST=0.0.0.0
+API_PORT=8000
+# API_CORS_ORIGINS=http://localhost:5173,http://localhost:3000
+
+# Dashboard
+# DASHBOARD_URL=http://localhost:5173
+
+# ===================================
+# Tracing & Metrics
+# ===================================
+# Built-in observability (stored in database)
+# ENABLE_TRACING=true
+# ENABLE_METRICS=true
+
+# ===================================
+# Backend Selection
+# ===================================
+# Choose which backends to use (defaults shown)
+# QUEUE_BACKEND=redis     # Options: redis, memory
+# DB_BACKEND=postgres     # Options: postgres, sqlite
+LLM_BACKEND=gemini        # Options: noop, openai, anthropic, gemini, groq, grok
+# CACHE_BACKEND=inmemory  # Options: inmemory, redis
+
+# LLM Model Configuration
+# LLM_MODEL=gpt-4o-mini
+# OPENAI_BASE_URL=http://localhost:8080/v1  # For vLLM or other OpenAI-compatible endpoints
+
+
+# Worker Scaling (Docker Compose)
+RESEARCHER_SCALE=1
+COORDINATOR_SCALE=1
+# Add more as needed: RESEARCHER_SCALE=2, WRITER_SCALE=1, etc.
+
+# ===================================
+# Per-Agent LLM Models
+# ===================================
+# Configure different models for each agent
+RESEARCHER_MODEL=gemini-2.5-flash
+RESEARCHER_FALLBACK_MODEL=gpt-4o-mini
+COORDINATOR_MODEL=gemini-2.5-flash
+COORDINATOR_FALLBACK_MODEL=gpt-4o-mini
+
+# ===================================
+# LLM API Keys
+# ===================================
+# Provide API keys for the LLM providers you want to use
+
+# OpenAI
+# OPENAI_API_KEY=sk-...
+
+# Google Gemini
+# GEMINI_API_KEY=AIza...
+
+# Anthropic
+# ANTHROPIC_API_KEY=sk-ant-...
+
+# Groq
+# GROQ_API_KEY=gsk_...
+
+# xAI Grok
+# XAI_API_KEY=xai-...
+# GROK_API_KEY=xai-...  # Alias for XAI_API_KEY
+
+# HTTP LLM (Generic endpoint)
+# HTTP_LLM_ENDPOINT=http://localhost:8080/generate
+
+# ===================================
+# Tool API Keys
+# ===================================
+
+# Serper.dev (Web Search Tool)
+# Required for web_search tool used by researcher agents
+# Get a free API key at: https://serper.dev (2,500 searches/month free tier)
+SERPER_API_KEY=
+
+# Add more tool API keys as needed
+# TAVILY_API_KEY=...
+# BROWSERLESS_API_KEY=...
+
+
+# ===================================
+# Dashboard Authentication
+# ===================================
+# Optional basic auth for dashboard (format: username:password)
+# EVENAGE_DASH_USERS=admin:admin
+
+# ===================================
+# Execution Limits
+# ===================================
+# Control agent execution behavior (can be overridden per-task)
+# MAX_ITERATIONS=10        # Maximum think-act cycles per agent task
+# MAX_TOOL_CALLS=          # Maximum successful tool calls (unset = unlimited)
+
+# ===================================
+# Development & Debugging
+# ===================================
+# LOG_LEVEL=INFO
+# DEBUG=false
+# VERBOSE=false
+

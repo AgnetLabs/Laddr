@@ -1,0 +1,26 @@
+# Laddr Framework
+# For development (local):
+# git+https://github.com/laddr/laddr.git@main
+# For development (local path - uncomment if needed):
+# -e ../path/to/laddr
+# For production (PyPI - when published):
+laddr>=0.5.0
+
+# Core dependencies
+fastapi>=0.112.0
+uvicorn[standard]>=0.30.0
+redis>=5.0.0
+aiokafka>=0.8.0
+pyyaml>=6.0.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+google-generativeai>=0.3.0
+SQLAlchemy>=2.0.0
+anthropic>=0.39.0
+minio>=7.2.0
+psycopg2-binary>=2.9.9
+aiohttp
+openai
+docker>=7.0.0
+# Observability is internal by default; external collectors are optional

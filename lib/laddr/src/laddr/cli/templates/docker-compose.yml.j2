@@ -1,0 +1,125 @@
+services:
+  # PostgreSQL database for internal observability
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: laddr
+      POSTGRES_PASSWORD: laddr
+      POSTGRES_DB: laddr
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U laddr"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Redis for message bus
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # MinIO for object storage (large artifacts/payloads)
+  minio:
+    image: minio/minio:latest
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Laddr API server
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      PYTHONPATH: "/app"
+      DATABASE_URL: "postgresql://laddr:laddr@postgres:5432/laddr"
+      REDIS_URL: "redis://redis:6379"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin123"
+      MINIO_SECURE: "false"
+      QUEUE_BACKEND: "redis"
+      DB_BACKEND: "postgres"
+    volumes:
+      - .:/app
+      - /var/run/docker.sock:/var/run/docker.sock  # Mount Docker socket for container logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: python -m laddr.api.main
+
+  # Dashboard (React + Vite)
+  dashboard:
+    image: agnetlabs/laddrdashboard:latest
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://api:8000
+      - VITE_DASH_USERS=${EVENAGE_DASH_USERS:-admin:admin}
+    depends_on:
+      - api
+
+{% for agent in agents %}
+  # {{ agent.name }} worker
+  {{ agent.name }}_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    working_dir: /app
+    env_file: .env
+    environment:
+      PYTHONPATH: "/app"
+      DATABASE_URL: "postgresql://laddr:laddr@postgres:5432/laddr"
+      REDIS_URL: "redis://redis:6379"
+      MINIO_ENDPOINT: "minio:9000"
+      MINIO_ACCESS_KEY: "minioadmin"
+      MINIO_SECRET_KEY: "minioadmin123"
+      MINIO_SECURE: "false"
+      QUEUE_BACKEND: "redis"
+      DB_BACKEND: "postgres"
+    volumes:
+      - .:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    command: python -m agents.{{ agent.name }}
+    deploy:
+      replicas: ${{ '{' }}{{ agent.name|upper }}_SCALE:-1{{ '}' }}
+
+{% endfor %}
+
+volumes:
+  postgres_data:
+  minio_data:

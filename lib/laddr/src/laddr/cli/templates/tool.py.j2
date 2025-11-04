@@ -1,0 +1,43 @@
+"""
+{{ tool_name|capitalize }} tool for Laddr agents.
+
+{{ tool_description }}
+"""
+
+from __future__ import annotations
+from typing import Any
+
+try:
+    from pydantic import BaseModel, Field
+except Exception:
+    BaseModel = object  # type: ignore
+    def Field(*args, **kwargs):  # type: ignore
+        return None
+
+from laddr import tool as tool_decorator
+
+
+class InputModel(BaseModel):  # type: ignore[misc]
+{% if params and params|length > 0 -%}
+{%-   for param in params %}
+    {{ param.name }}: Any = Field(description="{{ param.description|default('Input parameter') }}")
+{%-   endfor %}
+{%- else %}
+    query: Any = Field(description="Primary input for the tool")
+{%- endif %}
+
+
+@tool_decorator(
+    name="{{ tool_name }}",
+    description="{{ tool_description }}",
+    trace=True,
+    trace_mask=[]
+)
+def {{ tool_function_name }}(inputs: InputModel) -> dict:
+    """
+    {{ tool_description }}
+    """
+    # TODO: Implement the tool logic.
+    # Access validated inputs via attributes on the `inputs` model.
+    # Example: value = inputs.{{ params[0].name if params and params|length > 0 else 'query' }}
+    return {"status": "not_implemented"}

@@ -1,0 +1,93 @@
+[project]
+name = "laddr"
+dynamic = ["version"]
+description = "Laddr is a framework to build, run, and scale multi-agent systems that communicate, delegate, and execute tasks in parallel. Each agent can run multiple workers, powered by a queue-based delegation system that ensures horizontal scalability and resilience."
+readme = "README.md"
+authors = [
+    { name = "Laddr Team", email = "nishant@agnetlabs.com" }
+]
+requires-python = ">=3.10, <3.14"
+dependencies = [
+    # Core runtime
+    "pydantic>=2.11.9",
+    "requests>=2.31.0",
+
+    # FastAPI and Web
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+
+    # Message Queue - Redis
+    "redis>=5.0.0",
+
+    # Database
+    "sqlalchemy>=2.0.0",
+
+    # CLI
+    "click>=8.1.7",
+    "rich>=13.7.0",
+    "pyyaml>=6.0.1",
+    "jinja2>=3.1.0",
+
+    # Config
+    "python-dotenv>=1.1.1",
+    "pydantic-settings>=2.10.1",
+]
+
+[project.urls]
+Homepage = "https://laddr.dev"
+Documentation = "https://docs.laddr.dev"
+Repository = "https://github.com/laddr/laddr"
+
+[project.optional-dependencies]
+# LLM Provider extras
+openai = ["openai>=1.13.3"]
+anthropic = ["anthropic>=0.34.0"]
+gemini = ["google-generativeai>=0.8.0"]
+groq = ["groq>=0.11.0"]
+all-llms = ["openai>=1.13.3", "anthropic>=0.34.0", "google-generativeai>=0.8.0", "groq>=0.11.0"]
+
+# Database extras
+postgres = ["psycopg2-binary>=2.9.0"]
+mysql = ["pymysql>=1.1.0"]
+all-dbs = ["psycopg2-binary>=2.9.0", "pymysql>=1.1.0"]
+
+# Storage extras
+s3 = ["boto3>=1.34.0"]
+minio = ["minio>=7.2.0"]
+all-storage = ["boto3>=1.34.0", "minio>=7.2.0"]
+
+# Message Queue extras
+kafka = ["aiokafka>=0.11.0"]
+all-queues = ["aiokafka>=0.11.0", "aio-pika>=9.4.0"]
+
+# Combined extras
+all = [
+    "openai>=1.13.3",
+    "anthropic>=0.34.0",
+    "google-generativeai>=0.8.0",
+    "groq>=0.11.0",
+    "psycopg2-binary>=2.9.0",
+    "pymysql>=1.1.0",
+    "boto3>=1.34.0",
+    "minio>=7.2.0",
+    "aiokafka>=0.11.0",
+    "aio-pika>=9.4.0",
+]
+
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "black>=24.0.0",
+    "ruff>=0.5.0",
+    "mypy>=1.11.0",
+]
+
+[project.scripts]
+laddr = "laddr.cli.main:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "src/laddr/__init__.py"

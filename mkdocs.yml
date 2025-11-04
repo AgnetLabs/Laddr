@@ -1,0 +1,99 @@
+site_name: Laddr Documentation
+# site_url: /
+repo_url: https://github.com/NishantGupt786/agnet-private
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - content.code.copy
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [lib/laddr/src]
+          options:
+            docstring_style: google
+            show_root_heading: true
+            show_source: false
+            show_signature: true
+            separate_signature: true
+            members_order: source
+            filters: ["!^_"]
+
+markdown_extensions:
+  - admonition
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Configuration: configuration.md
+  - Guides:
+      - Recipes & edge cases: guides/recipes.md
+  - CLI:
+      - Commands: cli/commands.md
+  - API:
+      - Routes: api/routes.md
+      - Module: reference/laddr.api.main.md
+  - Reference:
+      - Overview: reference/index.md
+      - Top-level: reference/laddr.md
+      - Core:
+          - agent_base: reference/laddr.core.agent_base.md
+          - agent_runtime: reference/laddr.core.agent_runtime.md
+          - cache: reference/laddr.core.cache.md
+          - config: reference/laddr.core.config.md
+          - database: reference/laddr.core.database.md
+          - decorators: reference/laddr.core.decorators.md
+          - llm: reference/laddr.core.llm.md
+          - mcp_client: reference/laddr.core.mcp_client.md
+          - message_bus: reference/laddr.core.message_bus.md
+          - runtime_entry: reference/laddr.core.runtime_entry.md
+          - storage: reference/laddr.core.storage.md
+          - system_tools: reference/laddr.core.system_tools.md
+          - tooling: reference/laddr.core.tooling.md
+          - tracing: reference/laddr.core.tracing.md
+          - workflow: reference/laddr.core.workflow.md
+      - CLI:
+          - main: reference/laddr.cli.main.md
+          - commands:
+              - add: reference/laddr.cli.commands.add.md
+              - check: reference/laddr.cli.commands.check.md
+              - infra: reference/laddr.cli.commands.infra.md
+              - init: reference/laddr.cli.commands.init.md
+              - management: reference/laddr.cli.commands.management.md
+              - prompt: reference/laddr.cli.commands.prompt.md
+              - run: reference/laddr.cli.commands.run.md
+      - Utils:
+          - config: reference/laddr.utils.config.md
+          - docker: reference/laddr.utils.docker.md
+          - errors: reference/laddr.utils.errors.md
+          - logger: reference/laddr.utils.logger.md
+          - templates: reference/laddr.utils.templates.md
+      - LLMS & Queues:
+          - llms: reference/laddr.llms.md
+          - queues: reference/laddr.queues.md

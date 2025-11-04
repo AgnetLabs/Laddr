@@ -1,0 +1,120 @@
+# Laddr - Complete Requirements
+# This file includes all dependencies for the laddr framework,
+# including documentation, development, and optional integrations.
+
+# ============================================================================
+# Core Runtime Dependencies
+# ============================================================================
+pydantic>=2.11.9
+requests>=2.31.0
+
+# FastAPI and Web
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Message Queue - Redis
+redis>=5.0.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# CLI
+click>=8.1.7
+rich>=13.7.0
+pyyaml>=6.0.1
+jinja2>=3.1.0
+
+# Config
+python-dotenv>=1.1.1
+pydantic-settings>=2.10.1
+
+# ============================================================================
+# Documentation Dependencies
+# ============================================================================
+mkdocs>=1.6.1
+mkdocs-material>=9.5.0
+mkdocstrings>=0.26.0
+mkdocstrings-python>=1.0.0
+mkdocs-autorefs>=1.2.0
+mkdocs-click>=0.8.0
+
+# ============================================================================
+# Development Dependencies
+# ============================================================================
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-subprocess>=1.5.3
+pytest-recording>=0.13.4
+pytest-randomly>=4.0.1
+pytest-timeout>=2.4.0
+pytest-xdist>=3.8.0
+pytest-split>=0.10.0
+vcrpy==7.0.0
+
+# Code Quality
+black>=24.0.0
+ruff>=0.5.0
+mypy>=1.11.0
+pre-commit>=4.3.0
+bandit>=1.8.6
+
+# Type Stubs
+types-requests>=2.31.0
+types-pyyaml>=6.0.0
+types-regex>=2024.11.6
+types-appdirs>=1.4.0
+types-psycopg2>=2.9.21
+types-pymysql>=1.1.0
+boto3-stubs[bedrock-runtime]>=1.40.54
+
+# ============================================================================
+# Optional LLM Provider Dependencies (install as needed)
+# ============================================================================
+# Uncomment the providers you want to use:
+# openai>=1.13.3
+# anthropic>=0.34.0
+# google-generativeai>=0.8.0
+# groq>=0.11.0
+
+# ============================================================================
+# Optional Database Dependencies (install as needed)
+# ============================================================================
+# Uncomment the databases you want to use:
+# psycopg2-binary>=2.9.0  # PostgreSQL
+# pymysql>=1.1.0          # MySQL
+
+# ============================================================================
+# Optional Storage Dependencies (install as needed)
+# ============================================================================
+# Uncomment the storage backends you want to use:
+# boto3>=1.34.0   # AWS S3
+# minio>=7.2.0    # MinIO
+
+# ============================================================================
+# Optional Message Queue Dependencies (install as needed)
+# ============================================================================
+# Uncomment the message queue systems you want to use:
+# aiokafka>=0.11.0   # Apache Kafka
+# aio-pika>=9.4.0    # RabbitMQ
+
+# ============================================================================
+# Installation Instructions
+# ============================================================================
+# For core installation only:
+#   pip install -r requirements.txt --only-binary :all:
+#
+# For development (includes testing and linting):
+#   pip install -r requirements.txt
+#
+# For documentation (includes mkdocs):
+#   pip install -r requirements.txt
+#
+# To install laddr package in editable mode:
+#   pip install -e lib/laddr
+#
+# To install with all optional dependencies:
+#   Uncomment the optional sections above and run:
+#   pip install -r requirements.txt
+
+laddr>=0.5.0

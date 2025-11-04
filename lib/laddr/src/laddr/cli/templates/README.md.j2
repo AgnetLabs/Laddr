@@ -1,0 +1,138 @@
+# {{ project_name }}
+
+An Laddr agent project.
+
+## Getting Started
+
+1) Initialize (already done)
+
+2) Run the environment
+
+```bash
+laddr run dev
+```
+
+This will start:
+- PostgreSQL (with pgvector)
+- Redis
+- API server (from laddr library)
+- Agent workers
+- Dashboard
+
+### Workflow Modes
+
+The runtime automatically detects how to orchestrate your agents:
+
+**Coordinator Mode** (if `agents/coordinator.py` exists):
+- All requests route to coordinator
+- Coordinator uses `delegate_task` tool to distribute work
+- Worker agents (researcher, analyst, etc.) process subtasks
+- Coordinator synthesizes final results
+
+**Sequential Mode** (no coordinator):
+- Agents run in a chain, piping output from one to the next
+- Example: researcher → analyst → writer
+- Each agent receives the previous agent's output as input
+
+**Single Agent Mode**:
+- If only one agent exists, it runs in isolation
+- Direct request → response, no orchestration
+
+You can override the auto-detection by setting `AGENT_NAME` env var for isolated runs.
+
+### Local Development
+
+Run agents locally without Docker:
+
+```bash
+# With coordinator (auto-detected)
+python main.py run '{"message": "What are AI trends?"}'
+
+# Force specific agent
+AGENT_NAME=researcher python main.py run '{"message": "Research AI trends"}'
+
+# Sequential chain (rename coordinator.py to disable it)
+mv agents/coordinator.py agents/coordinator.py.bak
+python main.py run '{"message": "Process through all agents"}'
+mv agents/coordinator.py.bak agents/coordinator.py
+```
+
+Note: Local runs work but you won't have persistence (Postgres/Redis/MinIO). Use Docker for full stack.
+
+### Access services
+
+- Dashboard: http://localhost:5173
+- API: http://localhost:8000
+
+### Add more
+
+- `laddr add agent <name>` - Add a new agent
+- `laddr add tool <name>` - Add a custom tool
+- `laddr logs <agent>` - View agent logs
+- `laddr scale <agent> <N>` - Scale agent to N replicas
+- `laddr stop` - Stop all services
+
+## Project Structure
+
+```
+{{ project_name }}/
+├── laddr.yml          # Project configuration
+├── docker-compose.yml   # Infrastructure + services
+├── .env                 # Environment variables
+├── main.py              # Simple runner (optional)
+├── agents/              # Agent modules (flat files)
+│   ├── coordinator.py
+│   └── researcher.py
+├── tools/               # Shared tool functions
+│   ├── web_tools.py
+│   └── communication_tools.py
+├── workflows/           # Orchestration helpers (optional)
+│   ├── sequential_flow.py
+│   └── coordinator_flow.py
+└── workers/             # Worker entry points
+    ├── coordinator_worker.py
+    └── researcher_worker.py
+```
+
+## Configuration
+
+### Agent Execution Limits
+
+Control how long agents can run and how many tools they can use:
+
+**In Agent Definition** (default for all tasks):
+```python
+agent = Agent(
+    name="researcher",
+    max_iterations=15,      # Max think-act cycles
+    # max_tool_calls unset = unlimited
+    ...
+)
+```
+
+**Via Environment Variables** (override defaults):
+```bash
+MAX_ITERATIONS=20
+MAX_TOOL_CALLS=10
+```
+
+**Per-Task Override** (most specific):
+```bash
+python main.py run '{"query": "Research AI", "max_iterations": 25, "max_tool_calls": 8}'
+```
+
+**What's the difference?**
+- `max_iterations`: Maximum number of think-act cycles (each can be tool/delegate/think)
+- `max_tool_calls`: Maximum successful tool executions (prevents excessive API usage)
+
+### API Keys
+
+Edit `.env` to set API keys:
+- GEMINI_API_KEY — Gemini LLM
+- OPENAI_API_KEY — OpenAI GPT models (fallback)
+- SERPER_API_KEY — Web search tool (Serper.dev)
+
+## Learn More
+
+- [Laddr Documentation](https://docs.laddr.dev)
+- [Examples](https://github.com/laddr/laddr/tree/main/examples)

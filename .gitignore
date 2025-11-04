@@ -32,3 +32,4 @@ tester
 docs-env
 .venv-cli
 test-parallel-project
+my-agent

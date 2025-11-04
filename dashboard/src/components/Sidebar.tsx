@@ -24,22 +24,9 @@ export default function Sidebar() {
   return (
     <div className="w-64 h-screen bg-[#191A1A] flex flex-col">
       {/* Top Section (same height as header) */}
-      <div className="h-14 flex items-center px-3 border-b border-[#1F2121]">
-        <div className="w-12 h-12 flex items-center justify-center">
-          <svg width="61" height="61" viewBox="0 0 41 41" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <path d="M0 6.61364C0 2.96103 2.96103 0 6.61364 0H33.8864C37.539 0 40.5 2.96103 40.5 6.61364V33.8864C40.5 37.539 37.539 40.5 33.8864 40.5H6.61364C2.96103 40.5 0 37.539 0 33.8864V6.61364Z" fill="#191A1A"/>
-            <g clipPath="url(#clip0_86_4639)">
-              <path d="M31.4948 9.00521H9.00525V31.4948H31.4948V9.00521Z" fill="#181919" stroke="#231F20" strokeWidth="0.0104118" strokeMiterlimit="10"/>
-              <path d="M24.1832 14.0791V26.3934H16.7946V23.9306H21.7204V16.5419H16.7946V14.0791H24.1832Z" fill="#F9F9FA"/>
-              <path d="M19.2576 19.0047V21.4678H14.3317V26.3934H11.8689V19.0047H19.2576Z" fill="#F9F9FA"/>
-              <path d="M28.6311 23.9021H26.1123V26.4209H28.6311V23.9021Z" fill="#F9F9FA"/>
-            </g>
-            <defs>
-              <clipPath id="clip0_86_4639">
-                <rect width="22.5" height="22.5" fill="white" transform="translate(9 9)"/>
-              </clipPath>
-            </defs>
-          </svg>
+      <div className="h-14 flex items-center pt-1 px-3 border-b border-[#1F2121]">
+        <div className="w-[6.5rem] h-[6.5rem] flex items-center justify-center">
+          <img src="/laddr.svg" alt="Laddr Logo" />
         </div>
       </div>
 

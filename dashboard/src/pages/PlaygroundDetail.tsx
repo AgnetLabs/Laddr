@@ -119,7 +119,7 @@ function SpanRow({ span, depth, isExpanded, onToggle }: SpanRowProps) {
         </div>
 
         <div className="flex items-center gap-4 text-xs text-gray-400">
-          {span.metadata?.tokens && (
+          {typeof span.metadata?.tokens === 'number' && (
             <div className="flex items-center gap-1">
               <Zap className="w-3.5 h-3.5" />
               <span>{span.metadata.tokens.toLocaleString()}</span>
@@ -153,22 +153,22 @@ function SpanRow({ span, depth, isExpanded, onToggle }: SpanRowProps) {
                     <span className="ml-2 text-gray-300">{span.metadata.model}</span>
                   </div>
                 )}
-                {span.metadata.prompt_tokens !== undefined && (
+                {span.metadata.prompt_tokens != null && (
                   <div>
                     <span className="text-gray-500">Prompt Tokens:</span>
-                    <span className="ml-2 text-gray-300">{span.metadata.prompt_tokens.toLocaleString()}</span>
+                    <span className="ml-2 text-gray-300">{Number(span.metadata.prompt_tokens).toLocaleString()}</span>
                   </div>
                 )}
-                {span.metadata.completion_tokens !== undefined && (
+                {span.metadata.completion_tokens != null && (
                   <div>
                     <span className="text-gray-500">Completion Tokens:</span>
-                    <span className="ml-2 text-gray-300">{span.metadata.completion_tokens.toLocaleString()}</span>
+                    <span className="ml-2 text-gray-300">{Number(span.metadata.completion_tokens).toLocaleString()}</span>
                   </div>
                 )}
-                {span.metadata.total_tokens !== undefined && (
+                {span.metadata.total_tokens != null && (
                   <div>
                     <span className="text-gray-500">Total Tokens:</span>
-                    <span className="ml-2 text-cyan-400 font-semibold">{span.metadata.total_tokens.toLocaleString()}</span>
+                    <span className="ml-2 text-cyan-400 font-semibold">{Number(span.metadata.total_tokens).toLocaleString()}</span>
                   </div>
                 )}
               </div>

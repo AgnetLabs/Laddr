@@ -284,7 +284,7 @@ class ArtifactStorageTool:
     - New style: by bucket+key (e.g., offloaded response pointers)
     """
 
-    def __init__(self, storage_backend):
+    def __init__(self, storage_backend, default_bucket: str | None = None):
         """
         Initialize artifact storage tool.
         
@@ -292,6 +292,10 @@ class ArtifactStorageTool:
             storage_backend: Storage backend (MinIO/S3)
         """
         self.storage = storage_backend
+        # Allow caller to provide a project-wide default bucket name
+        # (e.g. from LaddrConfig.storage_bucket). If not provided we
+        # keep backward-compatible defaults in retrieval logic.
+        self.default_bucket = default_bucket
 
     async def store_artifact(
         self,
@@ -368,11 +372,10 @@ class ArtifactStorageTool:
             Dict with artifact data, metadata, and retrieval info
         """
         # New path: direct bucket/key retrieval (e.g., offloaded responses)
-        # NOTE: artifact storage uses the bucket "laddr-artifacts" by default
-        # for stored task artifacts. Use that as the default to avoid confusing
-        # callers that pass only a key or a job id.
+        # Prefer an explicit bucket argument, then the configured default
+        # bucket (self.default_bucket), then fall back to legacy names.
         if key is not None:
-            use_bucket = bucket or "laddr-artifacts"
+            use_bucket = bucket or self.default_bucket or "laddr"
             try:
                 data = await self.storage.get_object(bucket=use_bucket, key=key)
                 try:
@@ -388,19 +391,32 @@ class ArtifactStorageTool:
                     "retrieved_at": datetime.utcnow().isoformat(),
                 }
             except Exception as e:
-                return {
-                    "bucket": use_bucket,
-                    "key": key,
-                    "error": str(e),
-                    "status": "not_found",
-                }
+                # Try common legacy fallback bucket if first attempt fails
+                fallback_bucket = "laddr-artifacts"
+                try:
+                    data = await self.storage.get_object(bucket=fallback_bucket, key=key)
+                    try:
+                        parsed_data = json.loads(data.decode())
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        parsed_data = data.decode(errors='replace')
+
+                    return {
+                        "bucket": fallback_bucket,
+                        "key": key,
+                        "data": parsed_data,
+                        "size_bytes": len(data),
+                        "retrieved_at": datetime.utcnow().isoformat(),
+                    }
+                except Exception:
+                    # Not found anywhartifactsere -> raise so caller/runtime treats this as a tool error
+                    raise FileNotFoundError(f"Artifact not found at {use_bucket}/{key} (checked fallback {fallback_bucket})")
 
         # Detect if artifact_id is actually a full key path (contains slashes)
         # This handles the case where an offloaded response key is passed as artifact_id
         if artifact_id and "/" in artifact_id:
             # This is likely a response key like "responses/2025/11/04/<task_id>.json"
-            # Response storage uses the main bucket (not laddr-artifacts)
-            use_bucket = bucket or "laddr"  # Default to main bucket for responses
+            # Prefer explicit bucket, then configured default bucket, then legacy main bucket name
+            use_bucket = bucket or self.default_bucket or "laddr"
             try:
                 data = await self.storage.get_object(bucket=use_bucket, key=artifact_id)
                 try:
@@ -416,7 +432,7 @@ class ArtifactStorageTool:
                     "retrieved_at": datetime.utcnow().isoformat(),
                 }
             except Exception as e:
-                # If not found in main bucket, try laddr-artifacts as fallback
+                # If not found in preferred bucket, try legacy artifacts bucket
                 try:
                     fallback_bucket = "laddr-artifacts"
                     data = await self.storage.get_object(bucket=fallback_bucket, key=artifact_id)
@@ -433,25 +449,18 @@ class ArtifactStorageTool:
                         "retrieved_at": datetime.utcnow().isoformat(),
                     }
                 except Exception:
-                    # Return original error
-                    return {
-                        "bucket": use_bucket,
-                        "key": artifact_id,
-                        "error": str(e),
-                        "status": "not_found",
-                    }
+                    # Not found in any expected location -> raise for runtime to record a tool error
+                    raise FileNotFoundError(f"Artifact not found at {use_bucket}/{artifact_id} (checked fallback laddr-artifacts)")
 
         # Legacy path: artifact registry lookup by id/type
-        bucket = "laddr-artifacts"
+        legacy_bucket = "laddr-artifacts"
         if not artifact_id:
-            return {
-                "error": "artifact_id or (bucket and key) is required",
-                "status": "invalid_params",
-            }
+            raise ValueError("artifact_id or (bucket and key) is required")
+
         legacy_key = f"{artifact_type}/{artifact_id}"
 
         try:
-            data = await self.storage.get_object(bucket=bucket, key=legacy_key)
+            data = await self.storage.get_object(bucket=legacy_bucket, key=legacy_key)
             try:
                 parsed_data = json.loads(data.decode())
             except (json.JSONDecodeError, UnicodeDecodeError):
@@ -465,11 +474,8 @@ class ArtifactStorageTool:
                 "retrieved_at": datetime.utcnow().isoformat(),
             }
         except Exception as e:
-            return {
-                "artifact_id": artifact_id,
-                "error": str(e),
-                "status": "not_found",
-            }
+            # Not found -> raise so caller/runtime treats as tool error
+            raise FileNotFoundError(f"Legacy artifact not found at {legacy_bucket}/{legacy_key}: {e}")
 
     async def list_artifacts(
         self,
@@ -797,7 +803,13 @@ def create_system_tools(message_bus, storage_backend=None, agent=None) -> dict[s
 
     # Artifact storage tools (if storage backend available)
     if storage_backend:
-        artifact_tool = ArtifactStorageTool(storage_backend)
+        # Pass configured default bucket when available (agent may be None)
+        default_bucket = None
+        try:
+            default_bucket = agent.env_config.storage_bucket if agent and getattr(agent, 'env_config', None) else None
+        except Exception:
+            default_bucket = None
+        artifact_tool = ArtifactStorageTool(storage_backend, default_bucket=default_bucket)
         
         override = get_tool_override("system_store_artifact")
         if override:

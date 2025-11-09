@@ -117,5 +117,5 @@ boto3-stubs[bedrock-runtime]>=1.40.54
 #
 # To install with all optional dependencies:
 #   Uncomment the optional sections above and run:
-#   pip install -r requirements.txt
 docker>=7.0.0
+

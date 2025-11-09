@@ -133,6 +133,12 @@ class TaskDelegationTool:
         self.artifact_storage = artifact_storage
         self.agent = agent
         self._size_threshold_kb = 100  # Store payloads > 100KB in artifact registry
+        
+        # Get storage bucket from agent config, fallback to default
+        self._storage_bucket = None
+        if agent and hasattr(agent, 'env_config'):
+            self._storage_bucket = getattr(agent.env_config, 'storage_bucket', None)
+        self._storage_bucket = self._storage_bucket or "laddr"
 
     async def delegate_task(
         self,
@@ -275,8 +281,10 @@ class TaskDelegationTool:
         artifact_id = str(uuid.uuid4())
 
         if self.artifact_storage:
+            # Use configured bucket from env, not hardcoded
+            bucket = self._storage_bucket
             await self.artifact_storage.put_object(
-                bucket="laddr-artifacts",
+                bucket=bucket,
                 key=f"tasks/{artifact_id}.json",
                 data=json.dumps(data).encode()
             )
@@ -289,8 +297,10 @@ class TaskDelegationTool:
             return None
 
         try:
+            # Use configured bucket from env, not hardcoded
+            bucket = self._storage_bucket
             data = await self.artifact_storage.get_object(
-                bucket="laddr-artifacts",
+                bucket=bucket,
                 key=f"tasks/{artifact_id}.json"
             )
             return json.loads(data.decode())
@@ -346,8 +356,8 @@ class ArtifactStorageTool:
         else:
             data_bytes = data
 
-        # Store in artifact registry
-        bucket = "laddr-artifacts"
+        # Use configured bucket from env, fallback to legacy name
+        bucket = self.default_bucket or "laddr"
         key = f"{artifact_type}/{artifact_id}"
 
         await self.storage.put_object(
@@ -475,7 +485,8 @@ class ArtifactStorageTool:
                     raise FileNotFoundError(f"Artifact not found at {use_bucket}/{artifact_id} (checked fallback laddr-artifacts)")
 
         # Legacy path: artifact registry lookup by id/type
-        legacy_bucket = "laddr-artifacts"
+        # Use configured bucket from env, fallback to legacy name
+        legacy_bucket = self.default_bucket or "laddr"
         if not artifact_id:
             raise ValueError("artifact_id or (bucket and key) is required")
 
@@ -514,7 +525,8 @@ class ArtifactStorageTool:
         Returns:
             Dict with list of artifact metadata
         """
-        bucket = "laddr-artifacts"
+        # Use configured bucket from env, fallback to legacy name
+        bucket = self.default_bucket or "laddr"
         prefix = f"{artifact_type}/" if artifact_type else ""
 
         try:

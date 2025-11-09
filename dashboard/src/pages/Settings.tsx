@@ -1,5 +1,6 @@
 import { Settings as SettingsIcon, Server, Database, Zap } from 'lucide-react';
 import { useHealth } from '../lib/queries/health';
+import { getApiDocsUrl } from '../lib/config';
 
 export default function Settings() {
   const { data: health } = useHealth();
@@ -55,7 +56,7 @@ export default function Settings() {
             {
               title: 'API Documentation',
               desc: 'FastAPI interactive docs',
-              href: 'http://localhost:8000/docs',
+              href: getApiDocsUrl(),
             },
             {
               title: 'MinIO Console',

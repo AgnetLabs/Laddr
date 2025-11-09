@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Terminal, Download, Trash2, Play, Pause, Search, RefreshCw } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../lib/api';
+import { getWebSocketBaseUrl } from '../lib/config';
 
 interface ContainerInfo {
   id: string;
@@ -73,8 +74,10 @@ export default function Logs() {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//localhost:8000/ws/logs/${selectedContainer}`;
+    const wsBaseUrl = getWebSocketBaseUrl();
+    // Remove trailing slash if present
+    const baseUrl = wsBaseUrl.endsWith('/') ? wsBaseUrl.slice(0, -1) : wsBaseUrl;
+    const wsUrl = `${baseUrl}/ws/logs/${selectedContainer}`;
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
 

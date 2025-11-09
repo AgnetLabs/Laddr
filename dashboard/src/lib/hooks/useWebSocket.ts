@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { LogMessage, SystemEvent } from '../types';
+import { getWebSocketBaseUrl } from '../config';
 
-const WS_BASE_URL = (import.meta.env.VITE_API_URL ? import.meta.env.VITE_API_URL.replace('http', 'ws') : 'ws://localhost:8000');
+const WS_BASE_URL = getWebSocketBaseUrl();
 
 interface UseWebSocketOptions {
   onMessage?: (message: any) => void;

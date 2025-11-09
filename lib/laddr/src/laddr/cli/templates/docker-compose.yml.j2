@@ -52,7 +52,7 @@ services:
       dockerfile: Dockerfile
     working_dir: /app
     ports:
-      - "8000:8000"
+      - "${API_PORT:-8000}:8000"
     env_file: .env
     environment:
       PYTHONPATH: "/app"
@@ -82,7 +82,7 @@ services:
     ports:
       - "5173:5173"
     environment:
-      - VITE_API_URL=http://api:8000
+      - VITE_API_URL=http://api:${API_PORT:-8000}
       - VITE_DASH_USERS=${EVENAGE_DASH_USERS:-admin:admin}
     depends_on:
       - api

@@ -11,8 +11,7 @@ server {
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
     
     # Proxy API requests to backend
-    # NOTE: For production builds, use nginx.conf.template with envsubst
-    # This file uses default port 8000. For custom ports, use the template.
+    # API always listens on port 8000 inside container, regardless of host port
     location /api/ {
         proxy_pass http://api:8000/api/;
         proxy_http_version 1.1;
@@ -33,8 +32,7 @@ server {
     }
     
     # Proxy WebSocket connections
-    # NOTE: For production builds, use nginx.conf.template with envsubst
-    # This file uses default port 8000. For custom ports, use the template.
+    # API always listens on port 8000 inside container, regardless of host port
     location /ws/ {
         proxy_pass http://api:8000/ws/;
         proxy_http_version 1.1;
@@ -67,3 +65,4 @@ server {
         add_header Cache-Control "public, immutable";
     }
 }
+

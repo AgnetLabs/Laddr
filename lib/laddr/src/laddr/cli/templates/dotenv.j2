@@ -38,7 +38,7 @@ STORAGE_ENDPOINT=minio:9000
 STORAGE_ACCESS_KEY=minioadmin
 STORAGE_SECRET_KEY=minioadmin123
 STORAGE_SECURE=false
-# STORAGE_BUCKET=laddr
+STORAGE_BUCKET=laddr
 
 # Large Response Storage
 # Automatically offload large responses to storage backend
@@ -56,11 +56,10 @@ API_PORT=8000
 # DASHBOARD_URL=http://localhost:5173
 
 # ===================================
-# Tracing & Metrics
+# Tracing
 # ===================================
 # Built-in observability (stored in database)
 # ENABLE_TRACING=true
-# ENABLE_METRICS=true
 
 # ===================================
 # Backend Selection
@@ -68,13 +67,7 @@ API_PORT=8000
 # Choose which backends to use (defaults shown)
 # QUEUE_BACKEND=redis     # Options: redis, memory
 DB_BACKEND=postgres     # Options: postgres, sqlite
-LLM_BACKEND=gemini        # Options: noop, openai, anthropic, gemini, groq, grok
 # CACHE_BACKEND=inmemory  # Options: inmemory, redis
-
-# LLM Model Configuration
-# LLM_MODEL=gpt-4o-mini
-# OPENAI_BASE_URL=http://localhost:8080/v1  # For vLLM or other OpenAI-compatible endpoints
-
 
 # Worker Scaling (Docker Compose)
 RESEARCHER_SCALE=1
@@ -84,11 +77,19 @@ COORDINATOR_SCALE=1
 # ===================================
 # Per-Agent LLM Models
 # ===================================
-# Configure different models for each agent
-RESEARCHER_MODEL=gemini-2.5-flash
-RESEARCHER_FALLBACK_MODEL=gpt-4o-mini
-COORDINATOR_MODEL=gemini-2.5-flash
-COORDINATOR_FALLBACK_MODEL=gpt-4o-mini
+# Configure different models for each agent.
+# You can use the uppercase conventions shown below (common), or the
+# legacy/project-specific lowercase names that some deployments use
+# (e.g., `researcher_model`). The runtime supports both patterns.
+# Precedence: explicit AgentConfig -> LLM_* env vars -> legacy <agent>_model/backend vars.
+# Examples (preferred):
+# Canonical per-agent model envs (use these going forward):
+LLM_MODEL_RESEARCHER=gemini-2.5-flash
+LLM_MODEL_COORDINATOR=gemini-2.5-flash
+
+# Canonical per-agent LLM backend overrides (optional):
+LLM_BACKEND_RESEARCHER=gemini
+LLM_BACKEND_COORDINATOR=gemini
 
 # ===================================
 # LLM API Keys
@@ -111,8 +112,6 @@ COORDINATOR_FALLBACK_MODEL=gpt-4o-mini
 # XAI_API_KEY=xai-...
 # GROK_API_KEY=xai-...  # Alias for XAI_API_KEY
 
-# HTTP LLM (Generic endpoint)
-# HTTP_LLM_ENDPOINT=http://localhost:8080/generate
 
 # ===================================
 # Tool API Keys

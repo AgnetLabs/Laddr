@@ -81,7 +81,8 @@ Pre-defined, predictable pipelines where tasks flow through agents in a fixed se
 
 ### Extensibility
 - **Custom tools** — Add any Python function as an agent tool with `@tool` decorator
-- **LLM agnostic** — Works with Gemini, OpenAI, Anthropic, Groq, and local models
+- **Override system tools** — Extend delegation and storage with your own implementations
+- **LLM agnostic** — Works with Gemini, OpenAI, Anthropic, Groq, Ollama, and local models
 - **Pluggable backends** — Swap Redis, PostgreSQL, or storage providers easily
 
 ---
@@ -113,7 +114,15 @@ SERPER_API_KEY=your_serper_api_key  # Get from https://serper.dev
 # LLM API Keys (choose one or more)
 GEMINI_API_KEY=your_gemini_key      # Get from https://aistudio.google.com
 OPENAI_API_KEY=your_openai_key      # Get from https://platform.openai.com
+
+# Or use Ollama for local models (free, private, offline)
+# Install: curl -fsSL https://ollama.ai/install.sh | sh
+# Then: ollama pull gemma2:2b
+OLLAMA_BASE_URL=http://localhost:11434
+LLM_BACKEND=ollama  # Use local models instead of cloud APIs
 ```
+
+> 💡 **Using Ollama?** See the [Ollama Integration Guide](docs/guides/ollama-integration.md) for complete setup instructions including Docker configuration.
 
 ### Start the System
 
@@ -505,6 +514,58 @@ Large payloads are **automatically stored** in object storage:
 - Prevents message size limits
 - Enables large document processing
 - Supports binary data (images, PDFs, etc.)
+
+---
+
+## Custom System Tools
+
+Laddr allows you to **override built-in system tools** (delegation, artifact storage) with your own custom implementations:
+
+```python
+from laddr import override_system_tool, TaskDelegationTool
+
+@override_system_tool("system_delegate_task")
+async def custom_delegation(
+    agent_name: str,
+    task_description: str,
+    task: str,
+    task_data: dict = None,
+    timeout_seconds: int = 300,
+    _message_bus=None,
+    _artifact_storage=None,
+    _agent=None
+):
+    """Custom delegation with logging and metrics."""
+    
+    # Add your custom logic (logging, rate limiting, etc.)
+    logger.info(f"Delegating to {agent_name}: {task_description}")
+    
+    # Reuse base tool for actual delegation
+    delegation_tool = TaskDelegationTool(_message_bus, _artifact_storage, _agent)
+    result = await delegation_tool.delegate_task(
+        agent_name=agent_name,
+        task_description=task_description,
+        task=task,
+        task_data=task_data,
+        timeout_seconds=timeout_seconds
+    )
+    
+    logger.info(f"Delegation completed: {result}")
+    return result
+```
+
+**Available base tools:**
+- `TaskDelegationTool` — Single-task delegation
+- `ParallelDelegationTool` — Parallel multi-task delegation
+- `ArtifactStorageTool` — Artifact storage and retrieval
+
+**System tools you can override:**
+- `system_delegate_task` — Single task delegation
+- `system_delegate_parallel` — Parallel task delegation
+- `system_store_artifact` — Store data artifacts
+- `system_retrieve_artifact` — Retrieve data artifacts
+
+**Learn more:** See the [Custom System Tools Guide](docs/guides/custom-system-tools.md) for complete documentation with advanced patterns like rate limiting, circuit breakers, retries, and metrics.
 
 ---
 

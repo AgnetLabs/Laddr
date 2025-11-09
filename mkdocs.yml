@@ -54,6 +54,14 @@ nav:
   - Configuration: configuration.md
   - Guides:
       - Recipes & edge cases: guides/recipes.md
+      - Ollama Integration:
+          - Complete Guide: guides/ollama-integration.md
+          - Quick Reference: guides/ollama-quick-reference.md
+      - Custom System Tools:
+          - Overview: guides/system-tools-index.md
+          - Quick Start: guides/custom-system-tools-quickstart.md
+          - Complete Guide: guides/custom-system-tools.md
+          - Migration Guide: guides/migration-system-tools.md
   - CLI:
       - Commands: cli/commands.md
   - API:

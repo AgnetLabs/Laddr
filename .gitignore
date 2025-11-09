@@ -33,3 +33,6 @@ docs-env
 .venv-cli
 test-parallel-project
 my-agent
+examples
+docs
+mailer

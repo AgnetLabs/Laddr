@@ -56,7 +56,7 @@ class OpenAILLM:
             model=kwargs.get("model", self.default_model),
             messages=messages,
             temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 1000)
+            max_tokens=kwargs.get("max_tokens", 4096)
         )
 
         return response.choices[0].message.content
@@ -82,7 +82,7 @@ class OpenAILLM:
             model=kwargs.get("model", self.default_model),
             messages=messages,
             temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 1000)
+            max_tokens=kwargs.get("max_tokens", 4096)
         )
         text = resp.choices[0].message.content
         usage = {}
@@ -131,7 +131,7 @@ class AnthropicLLM:
 
         response = await self._client.messages.create(
             model=kwargs.get("model", self.default_model),
-            max_tokens=kwargs.get("max_tokens", 1000),
+            max_tokens=kwargs.get("max_tokens", 4096),
             system=system or "",
             messages=[{"role": "user", "content": prompt}]
         )
@@ -149,7 +149,7 @@ class AnthropicLLM:
                 raise RuntimeError("anthropic package not installed. Install with: pip install anthropic")
         resp = await self._client.messages.create(
             model=kwargs.get("model", self.default_model),
-            max_tokens=kwargs.get("max_tokens", 1000),
+            max_tokens=kwargs.get("max_tokens", 4096),
             system=system or "",
             messages=[{"role": "user", "content": prompt}]
         )
@@ -270,7 +270,7 @@ class GroqLLM:
             model=kwargs.get("model", self.default_model),
             messages=messages,
             temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 1000)
+            max_tokens=kwargs.get("max_tokens", 4096)
         )
 
         return response.choices[0].message.content
@@ -296,7 +296,7 @@ class GroqLLM:
             model=kwargs.get("model", self.default_model),
             messages=messages,
             temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 1000)
+            max_tokens=kwargs.get("max_tokens", 4096)
         )
         text = resp.choices[0].message.content
         usage = {}
@@ -477,3 +477,130 @@ class HTTPLLM:
         # Generic HTTP adapter: no standard usage. Return text with empty usage.
         text = await self.generate(prompt, system=system, **kwargs)
         return text, {"provider": "http"}
+
+
+class OllamaLLM:
+    """Local Ollama LLM backend (talks to a local Ollama HTTP server).
+
+    Default base URL: http://localhost:11434
+    Expected model names: e.g. "gemma2:2b" (use LLM_MODEL or per-agent LLM_MODEL_<AGENT>)
+    """
+
+    def __init__(self, base_url: str | None = None, model: str | None = None):
+        import os
+        self.base_url = base_url or os.getenv("OLLAMA_BASE_URL") or "http://localhost:11434"
+        self.default_model = model or os.getenv("LLM_MODEL") or os.getenv("OLLAMA_MODEL") or "gemma2:2b"
+
+    async def _post_try_endpoints(self, payload: dict) -> dict:
+        """Try a few common Ollama endpoints until one succeeds and returns JSON."""
+        try:
+            import aiohttp
+        except ImportError:
+            raise RuntimeError("aiohttp package not installed. Install with: pip install aiohttp")
+
+        endpoints = [
+            "/api/generate",
+            "/generate",
+            "/api/completions",
+            "/completions",
+        ]
+        failures: list[tuple[str, int | None, str | None]] = []
+
+        async with aiohttp.ClientSession() as session:
+            for ep in endpoints:
+                url = self.base_url.rstrip("/") + ep
+                try:
+                    async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                        status = resp.status
+                        if status != 200:
+                            # capture body for debugging but try next endpoint
+                            try:
+                                body = await resp.text()
+                            except Exception:
+                                body = None
+                            failures.append((url, status, body))
+                            continue
+                        # 200 OK: parse JSON if possible, else return raw text
+                        try:
+                            return await resp.json()
+                        except Exception:
+                            text = await resp.text()
+                            return {"text": text}
+                except Exception as e:
+                    # network/connection error - capture and continue
+                    failures.append((url, None, str(e)))
+                    continue
+
+        # No endpoint succeeded: raise with debugging info
+        failure_msgs = []
+        for u, st, body in failures:
+            if st is None:
+                failure_msgs.append(f"{u}=ERR({body})")
+            else:
+                snippet = (body or "").strip().replace('\n', ' ')[:240]
+                failure_msgs.append(f"{u}={st}:{snippet}")
+
+        raise RuntimeError(
+            f"Ollama endpoints not reachable at {self.base_url} (tried {endpoints}). Details: {'; '.join(failure_msgs)}"
+        )
+
+    async def generate(self, prompt: str, system: str | None = None, **kwargs) -> str:
+        model = kwargs.get("model") or self.default_model
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        # Ollama often accepts a single prompt or messages; send both where possible
+        # Ensure we request a non-streaming response from Ollama (deliver full response at once).
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "messages": messages,
+            # Explicitly request no streaming unless caller overrides
+            "stream": kwargs.get("stream", False),
+            **({k: v for k, v in kwargs.items() if k not in ("model", "stream")})
+        }
+
+        resp = await self._post_try_endpoints(payload)
+
+        # Normalize common shapes
+        if isinstance(resp, dict):
+            # common: {'text': '...'}
+            if "text" in resp:
+                return resp["text"]
+            # Ollama local server may return {'response': '...'} or {'response': {...}}
+            if "response" in resp:
+                r = resp["response"]
+                if isinstance(r, str):
+                    return r
+                if isinstance(r, dict):
+                    if "text" in r:
+                        return r["text"]
+                    if "output" in r:
+                        return r["output"]
+                    if "message" in r:
+                        return (r.get("message") or {}).get("content") or str(r)
+                    # stringify nested object as fallback
+                    return str(r)
+            if "output" in resp:
+                return resp["output"]
+            if "choices" in resp and resp["choices"]:
+                c0 = resp["choices"][0]
+                if isinstance(c0, dict) and "text" in c0:
+                    return c0["text"]
+                if isinstance(c0, dict) and "message" in c0:
+                    return (c0.get("message") or {}).get("content") or str(c0)
+            # fallback: stringify
+            return str(resp)
+
+        return str(resp)
+
+    async def generate_with_usage(self, prompt: str, system: str | None = None, **kwargs) -> tuple[str, dict]:
+        text = await self.generate(prompt, system=system, **kwargs)
+        # Ollama local server does not always return token usage; return minimal usage.
+        usage = {
+            "provider": "ollama",
+            "model": kwargs.get("model") or self.default_model,
+        }
+        return text, usage

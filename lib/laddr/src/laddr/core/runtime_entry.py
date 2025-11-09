@@ -138,7 +138,21 @@ class AgentRunner:
                 try:
                     # Recreate LLM backend from runner config so correct provider (gemini/openai) is used
                     if hasattr(agent, "factory"):
-                        setattr(agent, "llm", agent.factory.create_llm_backend())
+                        # Respect any agent-specific llm override on the AgentConfig
+                        import os as _os
+                        backend_override = getattr(agent.config, "llm_backend", None) if hasattr(agent, "config") else None
+                        model_override = getattr(agent.config, "llm_model", None) if hasattr(agent, "config") else None
+                        # Env var override LLM_BACKEND_<AGENT>
+                        try:
+                            env_key = f"LLM_BACKEND_{(agent.config.name or '').upper()}"
+                            env_model_key = f"LLM_MODEL_{(agent.config.name or '').upper()}"
+                            if _os.environ.get(env_key):
+                                backend_override = _os.environ.get(env_key)
+                            if _os.environ.get(env_model_key):
+                                model_override = _os.environ.get(env_model_key)
+                        except Exception:
+                            pass
+                        setattr(agent, "llm", agent.factory.create_llm_backend(override=backend_override, model_override=model_override, agent_name=agent.config.name))
                 except Exception:
                     pass
                 # Connect/register on the bus
@@ -604,19 +618,31 @@ class WorkerRunner:
         self.agent = agent
 
     async def start(self) -> None:
-        """Start processing tasks indefinitely for the agent's queue."""
+        """Start processing tasks indefinitely for the agent's queue."""        
         # Create bus from factory to ensure proper configuration (Kafka, Redis, etc.)
         bus = self.factory.create_queue_backend()
         
         # Replace agent's bus with the correctly configured one
         self.agent.bus = bus
         
-        # Ensure agent is connected/registered
-        try:
-            await self.agent.connect_bus()
-            print(f"[WorkerRunner] Agent {self.agent.config.name} connected to bus")
-        except Exception as e:
-            print(f"[WorkerRunner] Failed to connect agent to bus: {e}")
+        # Ensure agent is connected/registered with retry logic
+        max_retries = 10
+        retry_delay = 1  # Start with 1 second
+        
+        for attempt in range(max_retries):
+            try:
+                await self.agent.connect_bus()
+                print(f"[WorkerRunner] Agent {self.agent.config.name} connected to bus")
+                break
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"[WorkerRunner] Failed to connect agent to bus (attempt {attempt + 1}/{max_retries}): {e}")
+                    print(f"[WorkerRunner] Retrying in {retry_delay} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay = min(retry_delay * 2, 30)  # Exponential backoff, max 30s
+                else:
+                    print(f"[WorkerRunner] Failed to connect agent to bus after {max_retries} attempts: {e}")
+                    raise
 
         agent_name = self.agent.config.name
         print(f"[WorkerRunner] Starting consume loop for agent: {agent_name}")

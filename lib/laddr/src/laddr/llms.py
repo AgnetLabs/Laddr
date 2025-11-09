@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .core.llm import OpenAILLM, GeminiLLM, AnthropicLLM, GroqLLM, GrokLLM
+from .core.llm import OpenAILLM, GeminiLLM, AnthropicLLM, GroqLLM, GrokLLM, OllamaLLM
 
 
 class _LLMWithDefaults:
@@ -105,6 +105,21 @@ def grok(model: str | None = None, temperature: float | None = None) -> _LLMWith
         llm = grok(model="grok-beta", temperature=0.7)
     """
     backend = GrokLLM(api_key=None, model=model)
+    defaults: Dict[str, Any] = {}
+    if temperature is not None:
+        defaults["temperature"] = temperature
+    if model is not None:
+        defaults["model"] = model
+    return _LLMWithDefaults(backend, defaults)
+
+
+def ollama(model: str | None = None, temperature: float | None = None, base_url: str | None = None) -> _LLMWithDefaults:
+    """Create a local Ollama backend instance.
+
+    Example:
+        llm = ollama(model="gemma2:2b", base_url="http://localhost:11434")
+    """
+    backend = OllamaLLM(base_url=base_url, model=model)
     defaults: Dict[str, Any] = {}
     if temperature is not None:
         defaults["temperature"] = temperature

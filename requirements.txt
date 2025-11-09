@@ -3,20 +3,30 @@
 # including documentation, development, and optional integrations.
 
 # ============================================================================
+# Laddr Package & Build Tools
+# ============================================================================
+laddr>=0.8.0
+build
+twine
+
+# ============================================================================
 # Core Runtime Dependencies
 # ============================================================================
 pydantic>=2.11.9
+pydantic-settings>=2.10.1
 requests>=2.31.0
+python-dotenv>=1.1.1
 
 # FastAPI and Web
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 
-# Message Queue - Redis
+# Message Queue
 redis>=5.0.0
 
 # Database
 sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
 
 # CLI
 click>=8.1.7
@@ -24,9 +34,14 @@ rich>=13.7.0
 pyyaml>=6.0.1
 jinja2>=3.1.0
 
-# Config
-python-dotenv>=1.1.1
-pydantic-settings>=2.10.1
+# ============================================================================
+# LLM Providers
+# ============================================================================
+openai>=1.13.3
+litellm
+google-generativeai>=0.8.0
+# anthropic>=0.34.0
+# groq>=0.11.0
 
 # ============================================================================
 # Documentation Dependencies
@@ -69,32 +84,19 @@ types-pymysql>=1.1.0
 boto3-stubs[bedrock-runtime]>=1.40.54
 
 # ============================================================================
-# Optional LLM Provider Dependencies (install as needed)
+# Optional Database Dependencies (uncomment as needed)
 # ============================================================================
-# Uncomment the providers you want to use:
-# openai>=1.13.3
-# anthropic>=0.34.0
-# google-generativeai>=0.8.0
-# groq>=0.11.0
-
-# ============================================================================
-# Optional Database Dependencies (install as needed)
-# ============================================================================
-# Uncomment the databases you want to use:
-# psycopg2-binary>=2.9.0  # PostgreSQL
 # pymysql>=1.1.0          # MySQL
 
 # ============================================================================
-# Optional Storage Dependencies (install as needed)
+# Optional Storage Dependencies (uncomment as needed)
 # ============================================================================
-# Uncomment the storage backends you want to use:
 # boto3>=1.34.0   # AWS S3
 # minio>=7.2.0    # MinIO
 
 # ============================================================================
-# Optional Message Queue Dependencies (install as needed)
+# Optional Message Queue Dependencies (uncomment as needed)
 # ============================================================================
-# Uncomment the message queue systems you want to use:
 # aiokafka>=0.11.0   # Apache Kafka
 # aio-pika>=9.4.0    # RabbitMQ
 
@@ -116,7 +118,3 @@ boto3-stubs[bedrock-runtime]>=1.40.54
 # To install with all optional dependencies:
 #   Uncomment the optional sections above and run:
 #   pip install -r requirements.txt
-
-laddr>=0.8.0
-build
-twine

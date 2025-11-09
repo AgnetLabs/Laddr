@@ -56,6 +56,7 @@ All integrations (queue, database, LLM, cache) are configurable.
 
 from pathlib import Path
 from typing import Any, Protocol
+import os
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
@@ -342,37 +343,49 @@ class BackendFactory:
         db_url = _os.environ.get("DATABASE_URL") or self.config.database_url or "sqlite:///laddr.db"
         return DatabaseService(db_url)
 
-    def create_llm_backend(self) -> LLMBackend:
-        """Create LLM backend based on config."""
-        if self.config.llm_backend == "noop":
+    def create_llm_backend(self, override: str | None = None, model_override: str | None = None, agent_name: str | None = None) -> LLMBackend:
+        """Create LLM backend based on config.
+
+        If `override` is provided it takes precedence over the global
+        `LaddrConfig.llm_backend`. `model_override` can be provided to
+        select a different model for an agent.
+        """
+        backend_name = override or self.config.llm_backend
+        model = model_override or self.config.llm_model
+
+        if backend_name == "noop":
             from .llm import NoOpLLM
             return NoOpLLM()
-        if self.config.llm_backend == "openai":
+        if backend_name == "openai":
             from .llm import OpenAILLM
-            return OpenAILLM(self.config.openai_api_key, self.config.llm_model, base_url=self.config.openai_base_url)
-        if self.config.llm_backend == "anthropic":
+            return OpenAILLM(self.config.openai_api_key, model, base_url=self.config.openai_base_url)
+        if backend_name == "anthropic":
             from .llm import AnthropicLLM
-            return AnthropicLLM(self.config.anthropic_api_key, self.config.llm_model)
-        if self.config.llm_backend == "gemini":
+            return AnthropicLLM(self.config.anthropic_api_key, model)
+        if backend_name == "gemini":
             from .llm import GeminiLLM
-            return GeminiLLM(self.config.gemini_api_key, self.config.llm_model)
-        if self.config.llm_backend == "groq":
+            return GeminiLLM(self.config.gemini_api_key, model)
+        if backend_name == "groq":
             from .llm import GroqLLM
-            return GroqLLM(self.config.groq_api_key, self.config.llm_model)
-        if self.config.llm_backend == "grok":
+            return GroqLLM(self.config.groq_api_key, model)
+        if backend_name == "grok":
             from .llm import GrokLLM
-            return GrokLLM(self.config.xai_api_key or self.config.grok_api_key, self.config.llm_model)
-        if self.config.llm_backend == "http":
-            from .llm import HTTPLLM
-            if not self.config.http_llm_endpoint:
-                raise ValueError("http_llm_endpoint is required for http llm_backend")
-            return HTTPLLM(self.config.http_llm_endpoint)
-        if self.config.llm_backend == "vllm":
-            from .llm import OpenAILLM
-            if not self.config.openai_base_url:
-                raise ValueError("openai_base_url is required for vllm llm_backend")
-            return OpenAILLM(self.config.openai_api_key, self.config.llm_model, base_url=self.config.openai_base_url)
-        raise ValueError(f"Unknown llm_backend: {self.config.llm_backend}")
+            return GrokLLM(self.config.xai_api_key or self.config.grok_api_key, model)
+        if backend_name == "ollama":
+            # Local Ollama HTTP backend. Supports per-agent LLM_MODEL_<AGENT>
+            from .llm import OllamaLLM
+            # Resolve model: explicit override -> per-agent env -> config -> default
+            resolved_model = model
+            if not resolved_model and agent_name:
+                resolved_model = os.environ.get(f"LLM_MODEL_{agent_name.upper()}") or os.environ.get(f"LLM_MODEL_{agent_name.lower()}")
+            resolved_model = resolved_model or self.config.llm_model or "gemma2:2b"
+            # Resolve base URL: per-agent LLM_BASE_URL_<AGENT> -> OLLAMA_BASE_URL -> default
+            base_url = None
+            if agent_name:
+                base_url = os.environ.get(f"LLM_BASE_URL_{agent_name.upper()}") or os.environ.get(f"LLM_BASE_URL_{agent_name.lower()}")
+            base_url = base_url or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434"
+            return OllamaLLM(base_url=base_url, model=resolved_model)
+        
 
     def create_cache_backend(self) -> CacheBackend:
         """Create cache backend based on config."""
@@ -449,6 +462,10 @@ class AgentConfig(BaseModel):
     max_iterations: int = Field(default=5)  # Reduced from 7 to 5 - forced finish at 4 successful tools
     allow_delegation: bool = Field(default=True)
     verbose: bool = Field(default=False)
+    # Optional per-agent LLM overrides. If set, they take precedence over the
+    # global `LaddrConfig.llm_backend` and `LaddrConfig.llm_model` values.
+    llm_backend: str | None = Field(default=None, description="Optional agent-specific LLM backend (e.g., 'openai', 'gemini')")
+    llm_model: str | None = Field(default=None, description="Optional agent-specific LLM model name")
 
 
 class PipelineStage(BaseModel):

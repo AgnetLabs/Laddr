@@ -9,6 +9,7 @@ Exports:
 - Database: DatabaseService
 - Message bus: RedisBus, MemoryBus
 - Tool registry: ToolRegistry, discover_tools, bind_tools
+- System tools: TaskDelegationTool, ParallelDelegationTool, ArtifactStorageTool
 """
 # NOTE: MCP feature disabled for this release
 # - MCP: MCPToolSource, MCPToolRegistry
@@ -41,6 +42,16 @@ from .llm import AnthropicLLM, GeminiLLM, NoOpLLM, OpenAILLM
 
 from .message_bus import MemoryBus, RedisBus, ResponseMessage, TaskMessage
 from .runtime_entry import AgentRunner, WorkerRunner, run_agent
+from .system_tools import (
+    ArtifactStorageTool,
+    ParallelDelegationTool,
+    TaskDelegationTool,
+    clear_tool_overrides,
+    create_system_tools,
+    get_tool_override,
+    list_tool_overrides,
+    override_system_tool,
+)
 from .tooling import (
     Tool,
     ToolRegistry,
@@ -90,6 +101,15 @@ __all__ = [
     "bind_tools",
     # "register_mcp_tools",  # MCP disabled for this release
     "create_tool_schema",
+    # System tools - base classes for user extensions
+    "TaskDelegationTool",
+    "ParallelDelegationTool",
+    "ArtifactStorageTool",
+    "override_system_tool",
+    "get_tool_override",
+    "list_tool_overrides",
+    "clear_tool_overrides",
+    "create_system_tools",
     # MCP - disabled for this release
     # "MCPToolSource",
     # "MCPToolRegistry",

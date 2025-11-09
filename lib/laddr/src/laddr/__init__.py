@@ -37,6 +37,13 @@ from laddr.core.system_tools import (
     get_tool_override,
 )
 
+# System tool base classes for custom overrides
+from laddr.core.system_tools import (
+    TaskDelegationTool,
+    ParallelDelegationTool,
+    ArtifactStorageTool,
+)
+
 
 def Agent(
     *,
@@ -112,4 +119,8 @@ __all__ = [
     "list_tool_overrides",
     "clear_tool_overrides",
     "get_tool_override",
+    # System tool base classes
+    "TaskDelegationTool",
+    "ParallelDelegationTool",
+    "ArtifactStorageTool",
 ]

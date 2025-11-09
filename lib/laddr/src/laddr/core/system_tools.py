@@ -6,6 +6,13 @@ Provides tools for:
 - Storing large payloads in artifact registry (MinIO/S3)
 - Retrieving artifacts by ID
 - Tool override system for custom implementations
+
+Exported classes for user extensions:
+- TaskDelegationTool: Base class for single-task delegation
+- ParallelDelegationTool: Base class for parallel multi-task delegation
+- ArtifactStorageTool: Base class for artifact storage/retrieval
+
+Users can import these to build custom tool overrides that reuse base functionality.
 """
 
 from __future__ import annotations
@@ -18,6 +25,21 @@ import uuid
 
 # Module logger
 logger = logging.getLogger(__name__)
+
+# Public API exports
+__all__ = [
+    # Tool override system
+    "override_system_tool",
+    "get_tool_override",
+    "clear_tool_overrides",
+    "list_tool_overrides",
+    # Base tool classes for user extensions
+    "TaskDelegationTool",
+    "ParallelDelegationTool",
+    "ArtifactStorageTool",
+    # System tool factory
+    "create_system_tools",
+]
 
 # Global registry for tool overrides
 _TOOL_OVERRIDES: dict[str, Callable] = {}
@@ -756,7 +778,7 @@ def create_system_tools(message_bus, storage_backend=None, agent=None) -> dict[s
     
     This function checks for user-provided overrides before registering
     the default implementations. Users can use @override_system_tool 
-    decorator to replace any system tool.
+    decorator to replace any system tool OR create entirely new system tools.
     
     Args:
         message_bus: Message queue backend
@@ -766,13 +788,51 @@ def create_system_tools(message_bus, storage_backend=None, agent=None) -> dict[s
     Returns:
         Dict mapping tool names to (tool_function, aliases) tuples
     """
+    import functools
+    import inspect as _inspect
+    
+    def wrap_with_runtime_injection(tool_func):
+        """
+        Wrap a custom system tool function to inject runtime parameters.
+        
+        Custom override functions can declare _message_bus, _artifact_storage, _agent
+        parameters which will be automatically injected at call time.
+        """
+        sig = _inspect.signature(tool_func)
+        needs_injection = any(p in sig.parameters for p in ['_message_bus', '_artifact_storage', '_agent'])
+        
+        if not needs_injection:
+            # No injection needed, return as-is
+            return tool_func
+        
+        # Create wrapper that injects runtime parameters
+        @functools.wraps(tool_func)
+        async def wrapped_tool(*args, **kwargs):
+            # Inject runtime parameters if not already provided
+            if '_message_bus' in sig.parameters and '_message_bus' not in kwargs:
+                kwargs['_message_bus'] = message_bus
+            if '_artifact_storage' in sig.parameters and '_artifact_storage' not in kwargs:
+                kwargs['_artifact_storage'] = storage_backend
+            if '_agent' in sig.parameters and '_agent' not in kwargs:
+                kwargs['_agent'] = agent
+            
+            # Call the original function
+            result = tool_func(*args, **kwargs)
+            
+            # Await if async
+            if _inspect.iscoroutine(result) or _inspect.isawaitable(result):
+                return await result
+            return result
+        
+        return wrapped_tool
+    
     tools = {}
 
     # Task delegation tool (with agent context for job_id propagation)
     override = get_tool_override("system_delegate_task")
     if override:
         logger.info("✅ Using custom override for system_delegate_task")
-        tools["system_delegate_task"] = (override, [])
+        tools["system_delegate_task"] = (wrap_with_runtime_injection(override), [])
     else:
         delegation_tool = TaskDelegationTool(message_bus, storage_backend, agent=agent)
         tools["system_delegate_task"] = (delegation_tool.delegate_task, [])
@@ -784,7 +844,7 @@ def create_system_tools(message_bus, storage_backend=None, agent=None) -> dict[s
     override = get_tool_override("system_delegate_parallel")
     if override:
         logger.info("✅ Using custom override for system_delegate_parallel")
-        tools["system_delegate_parallel"] = (override, ["delegate_parallel"])
+        tools["system_delegate_parallel"] = (wrap_with_runtime_injection(override), ["delegate_parallel"])
     else:
         tools["system_delegate_parallel"] = (
             parallel_tool.delegate_parallel,
@@ -794,7 +854,7 @@ def create_system_tools(message_bus, storage_backend=None, agent=None) -> dict[s
     override = get_tool_override("system_split_document")
     if override:
         logger.info("✅ Using custom override for system_split_document")
-        tools["system_split_document"] = (override, ["split_document"])
+        tools["system_split_document"] = (wrap_with_runtime_injection(override), ["split_document"])
     else:
         tools["system_split_document"] = (
             parallel_tool.split_document,
@@ -814,22 +874,36 @@ def create_system_tools(message_bus, storage_backend=None, agent=None) -> dict[s
         override = get_tool_override("system_store_artifact")
         if override:
             logger.info("✅ Using custom override for system_store_artifact")
-            tools["system_store_artifact"] = (override, [])
+            tools["system_store_artifact"] = (wrap_with_runtime_injection(override), [])
         else:
             tools["system_store_artifact"] = (artifact_tool.store_artifact, [])
         
         override = get_tool_override("system_retrieve_artifact")
         if override:
             logger.info("✅ Using custom override for system_retrieve_artifact")
-            tools["system_retrieve_artifact"] = (override, [])
+            tools["system_retrieve_artifact"] = (wrap_with_runtime_injection(override), [])
         else:
             tools["system_retrieve_artifact"] = (artifact_tool.retrieve_artifact, [])
         
         override = get_tool_override("system_list_artifacts")
         if override:
             logger.info("✅ Using custom override for system_list_artifacts")
-            tools["system_list_artifacts"] = (override, [])
+            tools["system_list_artifacts"] = (wrap_with_runtime_injection(override), [])
         else:
             tools["system_list_artifacts"] = (artifact_tool.list_artifacts, [])
+
+    # NEW FEATURE: Register any additional custom system tools that weren't overrides
+    # This allows users to create entirely new system tools, not just override existing ones
+    known_tool_names = set(tools.keys())
+    for tool_name, tool_func in _TOOL_OVERRIDES.items():
+        # Skip aliases (like "delegate_parallel") - they're registered with the main tool
+        if tool_name in ["delegate_parallel", "split_document", "delegate_task"]:
+            continue
+        
+        # Add new custom system tools that don't override built-in ones
+        if tool_name not in known_tool_names:
+            logger.info(f"✅ Registering NEW system tool: {tool_name}")
+            # Wrap with runtime injection
+            tools[tool_name] = (wrap_with_runtime_injection(tool_func), [])
 
     return tools

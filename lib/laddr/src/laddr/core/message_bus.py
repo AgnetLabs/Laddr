@@ -97,6 +97,8 @@ class RedisBus:
         self.redis_url = redis_url
         self._client = None
         self._cancel_prefix = "laddr:cancel:"
+        # Persistent consumer ID for this worker instance
+        self._consumer_id = f"worker_{uuid.uuid4().hex[:8]}"
 
     async def _get_client(self) -> Any:
         """Lazy connection to Redis."""
@@ -225,7 +227,7 @@ class RedisBus:
         client = await self._get_client()
         stream_name = f"laddr:tasks:{agent_name}"
         group_name = f"{agent_name}_workers"
-        consumer_name = f"worker_{uuid.uuid4().hex[:8]}"  # Unique consumer ID per call
+        consumer_name = self._consumer_id  # Use persistent consumer ID for this worker instance
 
         # Ensure consumer group exists (idempotent operation)
         try:

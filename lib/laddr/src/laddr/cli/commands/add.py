@@ -205,6 +205,35 @@ def _create_agent_files(
     # Add worker service to docker-compose.yml
     add_worker_to_compose(Path.cwd(), agent_name)
 
+    # Update project .env with canonical per-agent LLM settings if present
+    # Do not overwrite existing values. Use canonical names: LLM_MODEL_<AGENT>, LLM_BACKEND_<AGENT>
+    env_path = Path(".env")
+    try:
+        if env_path.exists():
+            existing = env_path.read_text(encoding="utf-8")
+        else:
+            existing = ""
+
+        env_lines: list[str] = []
+        upper = agent_name.upper()
+        model_key = f"LLM_MODEL_{upper}"
+        backend_key = f"LLM_BACKEND_{upper}"
+
+        if model_key not in existing:
+            env_lines.append(f"{model_key}={llm_model}")
+        if backend_key not in existing:
+            env_lines.append(f"{backend_key}={llm_provider}")
+
+        if env_lines:
+            # Append with a blank line separator if file not empty
+            sep = "\n" if existing and not existing.endswith("\n") else ""
+            content = existing + sep + "\n".join(env_lines) + "\n"
+            write_file(env_path, content)
+            print_step("Updating .env", ", ".join(env_lines))
+    except Exception:
+        # Non-fatal: skip env update if anything goes wrong
+        pass
+
 
 def _create_tool_file(tool_name: str, agent_name: str, description: str) -> None:
     """Create tool file (project-level) and update agent configuration."""

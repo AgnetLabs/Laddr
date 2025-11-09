@@ -117,7 +117,57 @@ class Agent:
         if llm is not None:
             self.llm = llm
         else:
-            self.llm = self.factory.create_llm_backend()
+            # Determine per-agent LLM selection in order of precedence:
+            # 1) AgentConfig.llm_backend
+            # 2) Environment variable LLM_BACKEND_<AGENT_NAME>
+            # 3) Global LaddrConfig.llm_backend
+            import os as _os
+            # Build keys for environment overrides. Support multiple naming conventions:
+            # 1) LLM_BACKEND_<AGENT> / LLM_MODEL_<AGENT>
+            # 2) <agent>_backend / <agent>_model (legacy/project-specific, often lowercase like "researcher_model")
+            agent_name = (self.config.name or "")
+            agent_name_key = agent_name.upper()
+            env_key = f"LLM_BACKEND_{agent_name_key}"
+            env_model_key = f"LLM_MODEL_{agent_name_key}"
+
+            legacy_backend_key = f"{agent_name}_backend"
+            legacy_model_key = f"{agent_name}_model"
+
+            backend_override = None
+            model_override = None
+
+            try:
+                # AgentConfig override if provided
+                backend_override = getattr(self.config, "llm_backend", None) or None
+                model_override = getattr(self.config, "llm_model", None) or None
+            except Exception:
+                backend_override = None
+                model_override = None
+
+            # Environment variables take precedence over agent config. Check multiple keys and case variants.
+            try:
+                # Prefer LLM_* names (upper or lower), then legacy agent-specific names
+                env_backend = (
+                    _os.environ.get(env_key)
+                    or _os.environ.get(env_key.lower())
+                    or _os.environ.get(legacy_backend_key)
+                    or _os.environ.get(legacy_backend_key.upper())
+                )
+                env_model = (
+                    _os.environ.get(env_model_key)
+                    or _os.environ.get(env_model_key.lower())
+                    or _os.environ.get(legacy_model_key)
+                    or _os.environ.get(legacy_model_key.upper())
+                )
+
+                if env_backend:
+                    backend_override = env_backend
+                if env_model:
+                    model_override = env_model
+            except Exception:
+                pass
+
+            self.llm = self.factory.create_llm_backend(override=backend_override, model_override=model_override, agent_name=self.config.name)
         # Default LLM params (temperature, max_tokens, etc.) optionally provided by llm wrapper
         self._llm_params: dict = {}
         try:
@@ -189,32 +239,77 @@ class Agent:
 
         If the backend supports generate_with_usage, capture token usage and emit a trace
         event 'llm_usage' with provider/model and token counts for per-job accounting.
+        
+        Includes retry logic with exponential backoff for rate limit errors.
         """
+        import asyncio
+        import re
+        
         params = {**self._llm_params, **(kwargs or {})}
         
-        try:
-            # Prefer usage-aware API if available
-            if hasattr(self.llm, "generate_with_usage"):
-                text, usage = await self.llm.generate_with_usage(prompt, system=system, **params)  # type: ignore[attr-defined]
-                # Trace usage if available
-                try:
-                    if isinstance(usage, dict):
-                        payload = {
-                            "provider": usage.get("provider"),
-                            "model": usage.get("model"),
-                            "prompt_tokens": usage.get("prompt_tokens"),
-                            "completion_tokens": usage.get("completion_tokens"),
-                            "total_tokens": usage.get("total_tokens"),
-                            "worker": self.config.name,
-                        }
-                        self._trace(self.current_job_id or "unknown", self.config.name, "llm_usage", payload)
-                except Exception:
-                    pass
-                return text
-            # Fallback to text-only generation
-            return await self.llm.generate(prompt, system=system, **params)
-        except Exception as e:
-            raise RuntimeError(f"LLM generation failed: {str(e)}")
+        max_retries = 5
+        base_delay = 2.0  # Start with 2 seconds
+        
+        for attempt in range(max_retries):
+            try:
+                # Prefer usage-aware API if available
+                if hasattr(self.llm, "generate_with_usage"):
+                    text, usage = await self.llm.generate_with_usage(prompt, system=system, **params)  # type: ignore[attr-defined]
+                    # Trace usage if available
+                    try:
+                        if isinstance(usage, dict):
+                            payload = {
+                                "provider": usage.get("provider"),
+                                "model": usage.get("model"),
+                                "prompt_tokens": usage.get("prompt_tokens"),
+                                "completion_tokens": usage.get("completion_tokens"),
+                                "total_tokens": usage.get("total_tokens"),
+                                "worker": self.config.name,
+                            }
+                            self._trace(self.current_job_id or "unknown", self.config.name, "llm_usage", payload)
+                    except Exception:
+                        pass
+                    return text
+                # Fallback to text-only generation
+                return await self.llm.generate(prompt, system=system, **params)
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # Check if it's a rate limit error
+                is_rate_limit = (
+                    "rate_limit" in error_msg.lower() or
+                    "429" in error_msg or
+                    "too many requests" in error_msg.lower() or
+                    "quota" in error_msg.lower()
+                )
+                
+                if is_rate_limit and attempt < max_retries - 1:
+                    # Extract wait time from error message if available
+                    wait_time = base_delay * (2 ** attempt)  # Exponential backoff
+                    
+                    # Try to parse specific wait time from error (e.g., "try again in 2.16ms")
+                    match = re.search(r'try again in ([\d.]+)\s*(ms|s|seconds?|milliseconds?)', error_msg, re.IGNORECASE)
+                    if match:
+                        value = float(match.group(1))
+                        unit = match.group(2).lower()
+                        if 'ms' in unit or 'milli' in unit:
+                            wait_time = max(value / 1000.0, 2.0)  # Convert ms to seconds, min 2s
+                        else:
+                            wait_time = max(value, 2.0)  # Min 2 seconds
+                    
+                    logger.warning(
+                        "[%s] Rate limit hit (attempt %d/%d). Waiting %.2f seconds before retry...",
+                        self.config.name,
+                        attempt + 1,
+                        max_retries,
+                        wait_time
+                    )
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                # Not a rate limit or out of retries - raise the error
+                raise RuntimeError(f"LLM generation failed: {error_msg}")
 
     def _discover_tool_overrides(self):
         """
@@ -921,8 +1016,11 @@ class Agent:
         max_tools = max_tool_calls
         
         # Build context
+        # Check nested data.query for delegated tasks that wrap query in data field
         task_description = (
             task.get('query')
+            # ignore below line just experimenting
+            # or (task.get('data', {}).get('query') if isinstance(task.get('data'), dict) else None)
             or task.get('message')
             or task.get('task')
             or task.get('description')

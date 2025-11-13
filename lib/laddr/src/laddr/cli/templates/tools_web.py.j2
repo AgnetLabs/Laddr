@@ -20,21 +20,6 @@ except Exception:
     description="Search the web using Serper.dev API. Returns title, URL, and snippet for each result.",
     trace=True,
     trace_mask=[],
-    parameters={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string", 
-                "description": "Search query (be specific for better results)"
-            },
-            "max_results": {
-                "type": "integer", 
-                "description": "Maximum number of results to return (1-10, default 5)",
-                "default": 5
-            }
-        },
-        "required": ["query"]
-    }
 )
 def web_search(query: str, max_results: int = 5) -> Dict:
     """
@@ -159,16 +144,6 @@ def web_search(query: str, max_results: int = 5) -> Dict:
     description="Extract clean text content from a webpage URL. Returns up to 8000 characters. Fast fail on blocked sites.",
     trace=True,
     trace_mask=[],
-    parameters={
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "The full URL to scrape (must start with http:// or https://)"
-            }
-        },
-        "required": ["url"]
-    }
 )
 def scrape_url(url: str) -> Dict:
     """
@@ -308,21 +283,6 @@ def scrape_url(url: str) -> Dict:
     description="Extract all HTTP/HTTPS links from a webpage. Returns list of URLs.",
     trace=True,
     trace_mask=[],
-    parameters={
-        "type": "object",
-        "properties": {
-            "url": {
-                "type": "string",
-                "description": "The URL to extract links from"
-            },
-            "max_links": {
-                "type": "integer",
-                "description": "Maximum number of links to return (default 50)",
-                "default": 50
-            }
-        },
-        "required": ["url"]
-    }
 )
 def extract_links(url: str, max_links: int = 50) -> Dict:
     """

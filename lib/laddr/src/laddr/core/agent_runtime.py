@@ -362,7 +362,7 @@ class Agent:
     def _register_system_tools(self):
         """Register built-in system tools for delegation and artifacts."""
         from .system_tools import create_system_tools
-        from .tooling import Tool as _Tool
+        from .tooling import Tool as _Tool, create_tool_schema
         
         # First, discover any user-provided tool overrides
         self._discover_tool_overrides()
@@ -403,7 +403,14 @@ class Agent:
             if not self.tools.has(name):
                 try:
                     desc = (func.__doc__ or "").strip().split("\n")[0]
+                    
+                    # Create Tool object
                     tool = _Tool(name=name, func=func, description=desc)
+                    
+                    # Auto-generate parameters_schema from signature
+                    schema = create_tool_schema(tool)
+                    tool.parameters_schema = schema.get("parameters", {})
+                    
                     self.tools.register(tool, name=name, aliases=aliases)
                 except Exception:
                     # Fallback to direct registration
@@ -1421,6 +1428,70 @@ Provide a clear, complete final answer based on this information."""
             # Tracing must never break runtime
             pass
     
+    def _build_tool_documentation(self) -> str:
+        """Build comprehensive tool documentation with parameter schemas.
+        
+        Includes both user-defined tools and system tools with their full parameter schemas.
+        """
+        from .tooling import create_tool_schema
+        
+        tool_docs = []
+        
+        # Get all tools (both user-defined and system tools are in the same registry)
+        for tool_name in self.tools.list_names():
+            tool = self.tools.get(tool_name)
+            if not tool:
+                continue
+            
+            try:
+                # Generate schema (handles both user and system tools)
+                schema = create_tool_schema(tool)
+                
+                # Format for prompt
+                doc_parts = [f"### {tool_name}"]
+                doc_parts.append(f"Description: {tool.description}")
+                
+                # Format parameters
+                params = schema.get("parameters", {})
+                properties = params.get("properties", {})
+                required = params.get("required", [])
+                
+                if properties:
+                    doc_parts.append("Parameters:")
+                    for param_name, param_schema in properties.items():
+                        param_type = param_schema.get("type", "string")
+                        is_required = param_name in required
+                        default = param_schema.get("default")
+                        param_desc = param_schema.get("description", "")
+                        
+                        req_marker = " (required)" if is_required else " (optional)"
+                        default_marker = f" (default: {json.dumps(default)})" if default is not None else ""
+                        desc_marker = f" - {param_desc}" if param_desc else ""
+                        
+                        doc_parts.append(
+                            f"  - {param_name} ({param_type}){req_marker}{default_marker}{desc_marker}"
+                        )
+                else:
+                    doc_parts.append("Parameters: None")
+                
+                # Example usage
+                example_params = {}
+                for param_name in properties.keys():
+                    if param_name in required:
+                        example_params[param_name] = f"<{param_name}>"
+                
+                doc_parts.append(
+                    f'Example: {{"type":"tool","tool":"{tool_name}","params":{json.dumps(example_params)}}}'
+                )
+                
+                tool_docs.append("\n".join(doc_parts))
+            except Exception as e:
+                # If schema generation fails, still include the tool with basic info
+                logger.warning(f"Failed to generate schema for tool {tool_name}: {e}")
+                tool_docs.append(f"### {tool_name}\nDescription: {tool.description}\nParameters: (schema generation failed)")
+        
+        return "\n\n".join(tool_docs) if tool_docs else "None"
+    
     def _build_autonomous_system_prompt(
         self,
         available_tools: list[str],
@@ -1439,7 +1510,8 @@ Provide a clear, complete final answer based on this information."""
             except Exception:
                 custom_prompt = None
 
-        tool_list = "\n".join([f"- {t}" for t in available_tools]) if available_tools else "None"
+        # Build comprehensive tool documentation with parameters
+        tool_documentation = self._build_tool_documentation()
 
         agent_list = "None"
         if can_delegate and available_agents:
@@ -1476,7 +1548,7 @@ Schema:
 }}
 
 ## Available Tools:
-{tool_list}
+{tool_documentation}
 
 To use a tool:
 {{"type":"tool","tool":"<tool_name>","params":{{"param":"value"}}}}

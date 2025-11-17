@@ -1650,7 +1650,7 @@ Provide a clear, complete final answer based on this information."""
                 # Log schema info for MCP tools
                 if tool.parameters_schema and tool_name.startswith(("filesystem_", "google_sheets_")):
                     logger.debug(f"[{self.config.name}] MCP tool {tool_name} schema: {len(properties)} properties, {len(required)} required")
-                
+
                 if properties:
                     doc_parts.append("Parameters:")
                     for param_name, param_schema in properties.items():

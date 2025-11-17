@@ -402,6 +402,71 @@ def _extract_param_description(func: Callable, param_name: str) -> str | None:
     return None
 
 
+def _python_type_to_json_type(python_type) -> dict:
+    """Convert Python type annotation to JSON schema type."""
+    import typing
+    
+    # Handle generic types (list[str], dict[str, Any], etc.)
+    origin = getattr(python_type, '__origin__', None)
+    if origin is list or origin is typing.List:
+        args = getattr(python_type, '__args__', ())
+        if args:
+            items_type = _python_type_to_json_type(args[0])
+            result = {"type": "array"}
+            if "type" in items_type:
+                result["items"] = items_type
+            return result
+        return {"type": "array"}
+    
+    if origin is dict or origin is typing.Dict:
+        return {"type": "object"}
+    
+    # Handle Optional/Union (extract first non-None type)
+    if origin is typing.Union:
+        args = getattr(python_type, '__args__', ())
+        non_none = [a for a in args if a is not type(None)]
+        if non_none:
+            return _python_type_to_json_type(non_none[0])
+    
+    # Primitive types
+    if python_type == str or python_type is str:
+        return {"type": "string"}
+    if python_type == int or python_type is int:
+        return {"type": "integer"}
+    if python_type == float or python_type is float:
+        return {"type": "number"}
+    if python_type == bool or python_type is bool:
+        return {"type": "boolean"}
+    
+    # Default fallback
+    return {"type": "string"}
+
+
+def _extract_param_description(func: Callable, param_name: str) -> str | None:
+    """Extract parameter description from docstring (Google/NumPy style)."""
+    doc = func.__doc__ or ""
+    
+    # Try Google-style: Args: ... param_name: description
+    if "Args:" in doc or "Parameters:" in doc:
+        lines = doc.split("\n")
+        in_args = False
+        for line in lines:
+            if "Args:" in line or "Parameters:" in line:
+                in_args = True
+                continue
+            if in_args:
+                # Look for param_name: description
+                stripped = line.strip()
+                if stripped.startswith(f"{param_name}:"):
+                    desc = line.split(":", 1)[1].strip()
+                    return desc
+                # Stop at next section
+                if stripped.startswith(("Returns:", "Raises:", "Example:", "Note:")):
+                    break
+    
+    return None
+
+
 def create_tool_schema(tool: Tool) -> dict[str, Any]:
     """
     Create a JSON schema for a tool (for LLM function calling).

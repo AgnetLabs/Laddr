@@ -9,13 +9,88 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import logging
+import os
 import pkgutil
 from contextlib import suppress
+from datetime import datetime
 import time
+from typing import Any
 import uuid
 
 from .agent_runtime import Agent
 from .config import AgentConfig, BackendFactory, LaddrConfig
+
+logger = logging.getLogger(__name__)
+
+
+def _sanitize_for_json(obj: Any, max_depth: int = 50) -> Any:
+    """
+    Recursively sanitize objects for JSON serialization.
+    
+    Converts non-serializable types (coroutines, datetimes, bytes, etc.) to strings.
+    Prevents infinite recursion with max_depth limit.
+    
+    Args:
+        obj: Object to sanitize
+        max_depth: Maximum recursion depth
+        
+    Returns:
+        JSON-serializable object
+    """
+    if max_depth <= 0:
+        return "<max depth reached>"
+    
+    # Handle None
+    if obj is None:
+        return None
+    
+    # Handle coroutines (async functions that haven't been awaited)
+    if asyncio.iscoroutine(obj):
+        return f"<coroutine: {type(obj).__name__}>"
+    
+    # Handle coroutine functions
+    if asyncio.iscoroutinefunction(type(obj)):
+        return f"<coroutine function: {type(obj).__name__}>"
+    
+    # Handle datetime objects
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    
+    # Handle bytes
+    if isinstance(obj, bytes):
+        try:
+            return obj.decode('utf-8')
+        except UnicodeDecodeError:
+            return f"<bytes: {len(obj)} bytes>"
+    
+    # Handle sets
+    if isinstance(obj, set):
+        return [_sanitize_for_json(item, max_depth - 1) for item in obj]
+    
+    # Handle dictionaries
+    if isinstance(obj, dict):
+        return {
+            str(k): _sanitize_for_json(v, max_depth - 1)
+            for k, v in obj.items()
+        }
+    
+    # Handle lists and tuples
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(item, max_depth - 1) for item in obj]
+    
+    # Handle other non-serializable types
+    try:
+        # Try to serialize directly (works for primitives)
+        import json
+        json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        # Convert to string representation
+        try:
+            return str(obj)
+        except Exception:
+            return f"<non-serializable: {type(obj).__name__}>"
 
 
 class AgentRunner:
@@ -95,16 +170,33 @@ class AgentRunner:
                         original_instructions = getattr(candidate, "_extra_instructions", None)
                         original_is_coordinator = getattr(candidate, "is_coordinator", None)
                         original_available_agents = getattr(candidate, "available_agents_hint", None)
+                        original_mcp_providers = getattr(candidate, "_mcp_providers", None)
+                        
+                        # If original_tools is a ToolRegistry and we have MCP providers,
+                        # we need to include MCP providers in the tools list so they get processed
+                        tools_for_new_agent = original_tools
+                        from laddr.core.tooling import ToolRegistry
+                        if original_mcp_providers and isinstance(original_tools, ToolRegistry):
+                            # Extract regular tools from registry and combine with MCP providers
+                            # This ensures MCP providers are detected and registered in the new agent
+                            regular_tools = [tool.func for tool in original_tools.list()]
+                            tools_for_new_agent = regular_tools + list(original_mcp_providers)
+                            logger.debug(f"Preserving {len(original_mcp_providers)} MCP providers when recreating agent {agent_name}")
                         
                         agent = AgentCls(
                             agent_cfg, 
                             self.env_config,
-                            tools=original_tools,
+                            tools=tools_for_new_agent,
                             llm=original_llm,
                             instructions=original_instructions,
                             is_coordinator=original_is_coordinator,
                             available_agents=original_available_agents
                         )
+                        
+                        # Also preserve MCP providers directly as backup
+                        if original_mcp_providers:
+                            agent._mcp_providers = original_mcp_providers
+                            logger.debug(f"Set _mcp_providers on new agent instance: {len(original_mcp_providers)} providers")
                     except Exception:
                         # Fall back to using the provided module-level instance
                         agent = candidate  # type: ignore[assignment]
@@ -180,7 +272,7 @@ class AgentRunner:
 
         # Optionally start inline local workers so delegated tasks are executed in-process
         inline_env = (str(getattr(self.env_config, "enable_inline_workers", "")).lower() or 
-                      str(importlib.import_module('os').environ.get('EVENAGE_INLINE_WORKERS', '1')).lower())
+                      str(os.environ.get('ENABLE_INLINE_WORKERS', '1')).lower())
         enable_inline = inline_env not in ("0", "false", "no")
 
         if enable_inline and self._inline_worker_task is None:
@@ -220,9 +312,11 @@ class AgentRunner:
             if error:
                 outputs = {"error": error, **outputs}
 
+            # Sanitize outputs before saving to prevent JSON serialization errors
+            sanitized_outputs = _sanitize_for_json(outputs)
             self.database.save_result(
                 job_id=job_id,
-                outputs=outputs,
+                outputs=sanitized_outputs,
                 status=status
             )
 
@@ -239,9 +333,10 @@ class AgentRunner:
 
         except Exception as e:
             # Save error
+            sanitized_error = _sanitize_for_json({"error": str(e)})
             self.database.save_result(
                 job_id=job_id,
-                outputs={"error": str(e)},
+                outputs=sanitized_error,
                 status="failed"
             )
 
@@ -355,7 +450,15 @@ class AgentRunner:
         if self._inline_worker_task is not None:
             self._inline_worker_task.cancel()
             with suppress(Exception):
-                asyncio.get_event_loop().run_until_complete(self._inline_worker_task)
+                # Try to get running loop first, fallback to event loop for sync context
+                try:
+                    loop = asyncio.get_running_loop()
+                    # If we have a running loop, we can't use run_until_complete
+                    # Just cancel and let the loop handle it
+                except RuntimeError:
+                    # No running loop, safe to use get_event_loop()
+                    loop = asyncio.get_event_loop()
+                    loop.run_until_complete(self._inline_worker_task)
         self._inline_worker_task = None
         self._inline_worker_stop = None
 
@@ -492,11 +595,11 @@ class AgentRunner:
                         {"stage": i, "error": stage_result.get("error")}
                     )
 
+                    sanitized_stage_results = _sanitize_for_json({"stage_results": stage_results})
                     self.database.save_result(
                         job_id=job_id,
-                        outputs={"stage_results": stage_results},
-                        status="error",
-                        error=f"Stage {i} failed"
+                        outputs=sanitized_stage_results,
+                        status="error"
                     )
 
                     return {
@@ -522,11 +625,11 @@ class AgentRunner:
                     "error": str(e)
                 })
 
+                sanitized_stage_results = _sanitize_for_json({"stage_results": stage_results})
                 self.database.save_result(
                     job_id=job_id,
-                    outputs={"stage_results": stage_results},
-                    status="error",
-                    error=str(e)
+                    outputs=sanitized_stage_results,
+                    status="error"
                 )
 
                 return {
@@ -544,9 +647,10 @@ class AgentRunner:
             {"stages": len(stages)}
         )
 
+        sanitized_final_outputs = _sanitize_for_json({"stage_results": stage_results, "final": previous_output})
         self.database.save_result(
             job_id=job_id,
-            outputs={"stage_results": stage_results, "final": previous_output},
+            outputs=sanitized_final_outputs,
             status="completed"
         )
 
@@ -632,37 +736,37 @@ class WorkerRunner:
         for attempt in range(max_retries):
             try:
                 await self.agent.connect_bus()
-                print(f"[WorkerRunner] Agent {self.agent.config.name} connected to bus")
+                logger.info(f"Agent {self.agent.config.name} connected to bus")
                 break
             except Exception as e:
                 if attempt < max_retries - 1:
-                    print(f"[WorkerRunner] Failed to connect agent to bus (attempt {attempt + 1}/{max_retries}): {e}")
-                    print(f"[WorkerRunner] Retrying in {retry_delay} seconds...")
+                    logger.warning(f"Failed to connect agent to bus (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.info(f"Retrying in {retry_delay} seconds...")
                     await asyncio.sleep(retry_delay)
                     retry_delay = min(retry_delay * 2, 30)  # Exponential backoff, max 30s
                 else:
-                    print(f"[WorkerRunner] Failed to connect agent to bus after {max_retries} attempts: {e}")
+                    logger.error(f"Failed to connect agent to bus after {max_retries} attempts: {e}")
                     raise
 
         agent_name = self.agent.config.name
-        print(f"[WorkerRunner] Starting consume loop for agent: {agent_name}")
+        logger.info(f"Starting consume loop for agent: {agent_name}")
 
         while True:
             tasks = await bus.consume_tasks(agent_name, block_ms=2000, count=5)
             if not tasks:
-                print(f"[WorkerRunner] No tasks for {agent_name}, continuing...")
+                logger.debug(f"No tasks for {agent_name}, continuing...")
                 continue
-            print(f"[WorkerRunner] Received {len(tasks)} task(s) for {agent_name}")
+            logger.info(f"Received {len(tasks)} task(s) for {agent_name}")
             for message in tasks:
                 task_id = message.get("task_id")
                 payload = message.get("payload", {})
-                print(f"[WorkerRunner] Processing task {task_id}")
+                logger.debug(f"Processing task {task_id}")
                 try:
                     result = await self.agent.handle(payload)
                     if task_id:
                         await bus.publish_response(task_id, result)
-                        print(f"[WorkerRunner] Published response for task {task_id}")
+                        logger.debug(f"Published response for task {task_id}")
                 except Exception as e:
-                    print(f"[WorkerRunner] Error processing task {task_id}: {e}")
+                    logger.error(f"Error processing task {task_id}: {e}")
                     if task_id:
                         await bus.publish_response(task_id, {"status": "error", "error": str(e)})

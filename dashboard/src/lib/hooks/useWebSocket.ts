@@ -40,14 +40,21 @@ export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => 
 
   const connect = useCallback(() => {
     if (wsRef.current || isConnectingRef.current) return;
+    if (!url || url.trim() === '') {
+      // Don't connect if URL is empty
+      console.log('[WS] skipping connection - empty URL');
+      return;
+    }
     try {
       isConnectingRef.current = true;
-      const fullUrl = url.startsWith('ws') ? url : `${WS_BASE_URL}${url}`;
+      // Ensure URL starts with / if it's a relative path
+      const normalizedUrl = url.startsWith('/') ? url : `/${url}`;
+      const fullUrl = normalizedUrl.startsWith('ws') ? normalizedUrl : `${WS_BASE_URL}${normalizedUrl}`;
       console.log(`[WS] connecting ${fullUrl}`);
       const ws = new WebSocket(fullUrl);
 
       ws.onopen = () => {
-        console.log('[WS] open');
+        console.log('[WS] open', fullUrl);
         setIsConnected(true);
         setError(null);
         reconnectAttemptsRef.current = 0;
@@ -58,35 +65,42 @@ export const useWebSocket = (url: string, options: UseWebSocketOptions = {}) => 
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
+          console.log('[WS] message received:', data.type, data);
           onMessageRef.current?.(data);
         } catch (err) {
-          console.error('Failed to parse WebSocket message:', err);
+          console.error('Failed to parse WebSocket message:', err, event.data);
         }
       };
 
       ws.onerror = (event) => {
-        console.warn('[WS] error');
+        console.warn('[WS] error', event);
         setError('WebSocket error occurred');
         onErrorRef.current?.(event);
       };
 
-      ws.onclose = () => {
-        console.log('[WS] close');
+      ws.onclose = (event) => {
+        console.log('[WS] close', event.code, event.reason);
         setIsConnected(false);
         wsRef.current = null;
         isConnectingRef.current = false;
         if (reconnectTimeoutRef.current) {
           clearTimeout(reconnectTimeoutRef.current);
         }
+        // Don't reconnect if it was a normal closure (code 1000) or if we've exceeded max attempts
+        if (event.code === 1000) {
+          console.log('[WS] Normal closure, not reconnecting');
+          return;
+        }
         if (reconnectAttemptsRef.current < maxReconnectAttempts) {
           reconnectAttemptsRef.current++;
           const delay = Math.min(backoffRef.current, 30000);
-          console.log(`[WS] reconnect in ${delay}ms`);
+          console.log(`[WS] reconnect in ${delay}ms (attempt ${reconnectAttemptsRef.current}/${maxReconnectAttempts})`);
           reconnectTimeoutRef.current = window.setTimeout(() => {
             backoffRef.current = Math.min(backoffRef.current * 2, 30000);
             connect();
           }, delay);
         } else {
+          console.error('[WS] Max reconnection attempts reached');
           setError('Max reconnection attempts reached');
         }
       };
@@ -239,8 +253,14 @@ export const usePlaygroundTraces = (playgroundId: string | null) => {
             // Backend sends incremental updates with new spans
             // We need to merge them with existing spans
             setTraces((prev) => {
-              const existingSpans = prev[0]?.spans || [];
+              // Get existing spans - handle both [{spans: [...]}] format and empty array
+              const existingSpans = (prev.length > 0 && prev[0]?.spans) ? prev[0].spans : [];
               const newSpans = message.data.spans;
+              
+              // If no existing spans, just use the new spans (initial load)
+              if (existingSpans.length === 0) {
+                return [{ spans: newSpans }];
+              }
               
               // Create a map of existing spans by ID for quick lookup
               const spanMap = new Map();
@@ -261,7 +281,7 @@ export const usePlaygroundTraces = (playgroundId: string | null) => {
               // Add/update with new spans (this handles updates to existing spans too)
               addToMap(newSpans);
               
-              // For simplicity, just append new unique spans
+              // Convert map back to array (preserving order from existing, then new)
               const existingIds = new Set(existingSpans.map((s: any) => s.id));
               const spansToAdd = newSpans.filter((s: any) => !existingIds.has(s.id));
               

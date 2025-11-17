@@ -58,7 +58,7 @@ def override_system_tool(tool_name: str):
         @override_system_tool("system_delegate_parallel")
         async def my_custom_parallel_delegation(agent_name: str, tasks: list[str], **kwargs):
             # Your custom implementation
-            print(f"Custom parallel delegation: {len(tasks)} tasks to {agent_name}")
+            logger.info(f"Custom parallel delegation: {len(tasks)} tasks to {agent_name}")
             return {"status": "success", "results": [...]}
     
     Args:
@@ -177,7 +177,6 @@ class TaskDelegationTool:
         - You do NOT need to call retrieve_artifact unless response explicitly says {"stored_in_registry": true}
         - task_id is for tracking only, NOT for artifact retrieval
         """
-        import sys
         # Backward compatibility: accept "timeout" as alias for "timeout_seconds"
         if timeout is not None:
             timeout_seconds = timeout
@@ -204,14 +203,19 @@ class TaskDelegationTool:
         # DEBUG: Show agent identity and state
         agent_id = id(self.agent) if self.agent else None
         agent_name_debug = getattr(self.agent.config, 'name', 'unknown') if self.agent and hasattr(self.agent, 'config') else 'unknown'
-        print(f"[DELEGATION DEBUG] agent_id={agent_id}, agent_name={agent_name_debug}, has_current_job_id={hasattr(self.agent, 'current_job_id') if self.agent else False}, agent.job_id={self.agent.current_job_id if self.agent and hasattr(self.agent, 'current_job_id') else None}, injected_parent_job_id={parent_job_id}, final_job_id={job_id_to_use}", file=sys.stderr, flush=True)
+        logger.debug(
+            f"Delegation: agent_id={agent_id}, agent_name={agent_name_debug}, "
+            f"has_current_job_id={hasattr(self.agent, 'current_job_id') if self.agent else False}, "
+            f"agent.job_id={self.agent.current_job_id if self.agent and hasattr(self.agent, 'current_job_id') else None}, "
+            f"injected_parent_job_id={parent_job_id}, final_job_id={job_id_to_use}"
+        )
         
         if job_id_to_use:
             if "job_id" not in payload:
                 payload["job_id"] = job_id_to_use
-                print(f"[DELEGATION] ✓ Propagating job_id={job_id_to_use} to {agent_name}", file=sys.stderr, flush=True)
+                logger.debug(f"Propagating job_id={job_id_to_use} to {agent_name}")
         else:
-            print(f"[DELEGATION WARNING] ✗ No job_id to propagate from agent {agent_name_debug}", file=sys.stderr, flush=True)
+            logger.warning(f"No job_id to propagate from agent {agent_name_debug}")
 
         # Check if payload is too large and should be stored in artifact registry
         payload_size_kb = len(json.dumps(payload).encode()) / 1024
@@ -304,7 +308,8 @@ class TaskDelegationTool:
                 key=f"tasks/{artifact_id}.json"
             )
             return json.loads(data.decode())
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to retrieve artifact {artifact_id}: {e}")
             return None
 
 

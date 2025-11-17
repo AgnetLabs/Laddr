@@ -23,6 +23,14 @@ logger = logging.getLogger(__name__)
 Base = declarative_base()
 
 
+def _iso_z(dt: datetime | None) -> str | None:
+    """Convert datetime to ISO format with Z suffix (UTC)."""
+    if not dt:
+        return None
+    # stored as naive UTC; normalize to Z-suffixed ISO for clients
+    return dt.isoformat() + "Z"
+
+
 class Job(Base):
     """Job execution record (legacy terminology)."""
 
@@ -187,12 +195,6 @@ class DatabaseService:
             if not job:
                 return None
 
-            def _iso_z(dt: datetime | None) -> str | None:
-                if not dt:
-                    return None
-                # stored as naive UTC; normalize to Z-suffixed ISO for clients
-                return dt.isoformat() + "Z"
-
             return {
                 "job_id": job.job_id,
                 "pipeline_name": job.pipeline_name,
@@ -207,9 +209,6 @@ class DatabaseService:
         """List recent jobs."""
         with self.get_session() as session:
             jobs = session.query(Job).order_by(Job.created_at.desc()).limit(limit).all()
-
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
 
             return [
                 {
@@ -265,9 +264,6 @@ class DatabaseService:
             if not prompt:
                 return None
 
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
-
             return {
                 "prompt_id": prompt.prompt_id,
                 "prompt_name": prompt.prompt_name,
@@ -282,9 +278,6 @@ class DatabaseService:
         """List recent prompt executions."""
         with self.get_session() as session:
             prompts = session.query(PromptExecution).order_by(PromptExecution.created_at.desc()).limit(limit).all()
-
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
 
             return [
                 {
@@ -301,15 +294,13 @@ class DatabaseService:
         with self.get_session() as session:
             traces = session.query(Trace).filter_by(job_id=job_id).order_by(Trace.timestamp).all()
 
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
-
             return [
                 {
                     "id": trace.id,
                     "job_id": trace.job_id,
                     "agent_name": trace.agent_name,
                     "event_type": trace.event_type,
+                    "parent_id": trace.parent_id,  # Include parent_id for hierarchical traces
                     "payload": trace.payload,
                     "timestamp": _iso_z(trace.timestamp),
                 }
@@ -339,9 +330,6 @@ class DatabaseService:
 
             traces = query.order_by(Trace.timestamp.desc()).limit(limit).all()
 
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
-
             return [
                 {
                     "id": trace.id,
@@ -360,8 +348,6 @@ class DatabaseService:
             trace = session.query(Trace).filter_by(id=trace_id).first()
             if not trace:
                 return None
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
             return {
                 "id": trace.id,
                 "job_id": trace.job_id,
@@ -439,9 +425,6 @@ class DatabaseService:
         """List all registered agents with trace counts and last execution time."""
         with self.get_session() as session:
             agents = session.query(AgentRegistry).all()
-
-            def _iso_z(dt: datetime | None) -> str | None:
-                return dt.isoformat() + "Z" if dt else None
 
             result = []
             for agent in agents:

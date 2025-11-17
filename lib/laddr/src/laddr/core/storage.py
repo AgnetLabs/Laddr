@@ -9,6 +9,9 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import io
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class S3Storage:
@@ -98,14 +101,14 @@ class S3Storage:
                         client.make_bucket(bucket, location=self.region)
                     else:
                         client.make_bucket(bucket)
-                    print(f"✓ Created storage bucket: {bucket}")
+                    logger.info(f"Created storage bucket: {bucket}")
                 except Exception as e:
                     raise RuntimeError(
                         f"Bucket '{bucket}' does not exist and could not be created. "
                         f"Error: {e}. Check permissions and configuration."
                     )
 
-        await asyncio.get_event_loop().run_in_executor(None, _ensure)
+        await asyncio.get_running_loop().run_in_executor(None, _ensure)
 
     async def put_object(
         self,
@@ -155,7 +158,7 @@ class S3Storage:
             )
             return True
 
-        return await asyncio.get_event_loop().run_in_executor(None, _put)
+        return await asyncio.get_running_loop().run_in_executor(None, _put)
 
     async def get_object(self, bucket: str, key: str) -> bytes:
         """
@@ -176,7 +179,7 @@ class S3Storage:
             response.release_conn()
             return data
 
-        return await asyncio.get_event_loop().run_in_executor(None, _get)
+        return await asyncio.get_running_loop().run_in_executor(None, _get)
 
     async def list_objects(
         self,
@@ -212,7 +215,7 @@ class S3Storage:
 
             return objects
 
-        return await asyncio.get_event_loop().run_in_executor(None, _list)
+        return await asyncio.get_running_loop().run_in_executor(None, _list)
 
     async def delete_object(self, bucket: str, key: str) -> bool:
         """
@@ -230,7 +233,7 @@ class S3Storage:
             client.remove_object(bucket, key)
             return True
 
-        return await asyncio.get_event_loop().run_in_executor(None, _delete)
+        return await asyncio.get_running_loop().run_in_executor(None, _delete)
 
     async def object_exists(self, bucket: str, key: str) -> bool:
         """
@@ -251,7 +254,7 @@ class S3Storage:
             except Exception:
                 return False
 
-        return await asyncio.get_event_loop().run_in_executor(None, _exists)
+        return await asyncio.get_running_loop().run_in_executor(None, _exists)
 
 
 # Backward compatibility alias

@@ -342,7 +342,7 @@ export default function Playground() {
     null
   );
   const [showTraces, setShowTraces] = useState(false);
-  const { traces, isConnected, isComplete } =
+  const { traces, isConnected, isComplete, error } =
     usePlaygroundTraces(activePlaygroundId);
 
   // Set default agent when agents load
@@ -414,8 +414,19 @@ export default function Playground() {
   };
 
   // Extract spans from traces (WebSocket sends hierarchical structure)
-  const spans: Span[] =
-    traces.length > 0 && traces[0].spans ? traces[0].spans : [];
+  // Handle both [{spans: [...]}] format and direct spans array
+  const spans: Span[] = (() => {
+    if (traces.length === 0) return [];
+    // Check if first element has spans property
+    if (traces[0]?.spans && Array.isArray(traces[0].spans)) {
+      return traces[0].spans;
+    }
+    // Fallback: if traces is already an array of spans
+    if (Array.isArray(traces) && traces.length > 0 && traces[0]?.id) {
+      return traces as Span[];
+    }
+    return [];
+  })();
 
   // Recursively calculate total tokens from all spans
   const calculateTotalTokens = (spanList: Span[]): number => {
@@ -1008,11 +1019,20 @@ Example: Research the top 5 programming languages in 2024 and write a comparison
           </div>
 
           <div className="h-96 overflow-y-auto bg-[#191A1A]">
-            {spans.length === 0 ? (
+            {!isConnected ? (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                <div className="text-center">
+                  <Activity className="w-12 h-12 mx-auto mb-3 opacity-50 animate-pulse" />
+                  <p className="text-sm">Connecting to WebSocket...</p>
+                  {error && <p className="text-xs text-red-400 mt-2">{error}</p>}
+                </div>
+              </div>
+            ) : spans.length === 0 ? (
               <div className="flex items-center justify-center h-full text-gray-500">
                 <div className="text-center">
                   <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p className="text-sm">Waiting for traces...</p>
+                  <p className="text-xs text-gray-600 mt-2">WebSocket connected, waiting for trace data...</p>
                 </div>
               </div>
             ) : (

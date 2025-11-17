@@ -31,6 +31,9 @@ dependencies = [
     # Config
     "python-dotenv>=1.1.1",
     "pydantic-settings>=2.10.1",
+    
+    # MCP (Model Context Protocol)
+    "aiohttp>=3.9.0",  # For HTTP and SSE transports
 ]
 
 [project.urls]

@@ -202,16 +202,48 @@ class Agent:
             self.tools = discover_tools(config.name)
         elif isinstance(tools, ToolRegistry):
             self.tools = tools
+            # If tools is a ToolRegistry, we still need to check for MCP providers
+            # that might have been preserved from the original agent instance
+            # (This happens when AgentRunner recreates an agent)
+            # MCP providers will be set separately via _mcp_providers attribute
+            # and registered in connect_bus() or _ensure_mcp_tools_registered()
         else:
             # Accept list of callables and register
             from .tooling import ToolRegistry as _TR
             tr = _TR()
+            
+            # Check for MCP providers in tools list
+            mcp_providers = []
+            regular_tools = []
+            
             for t in (tools or []):
+                # Check if it's an MCP provider
+                try:
+                    from .mcp_tools import MCPToolProvider, MultiMCPToolProvider
+                    if isinstance(t, (MCPToolProvider, MultiMCPToolProvider)):
+                        mcp_providers.append(t)
+                        continue
+                except ImportError:
+                    # MCP not available, skip check
+                    pass
+                
+                # Regular tool
                 try:
                     tr.register(t)
-                except Exception:
+                    regular_tools.append(t)
+                except Exception as e:
+                    logger.debug(f"Failed to register tool {getattr(t, '__name__', str(t))}: {e}")
                     continue
+            
             self.tools = tr
+            
+            # Handle MCP providers
+            if mcp_providers:
+                self._mcp_providers = mcp_providers
+                # MCP connections will be established in connect_bus() (called early)
+                # This ensures tools are available before first run
+            else:
+                self._mcp_providers = []
 
         # Add system tools for delegation and artifact storage
         # This is called AFTER is_coordinator is set
@@ -421,7 +453,22 @@ class Agent:
         Connect to message bus and register agent.
         
         Starts heartbeat to maintain registration.
+        MCP servers are connected and tools registered BEFORE bus registration
+        to ensure tools are available immediately.
         """
+        # Connect MCP servers and register tools BEFORE registering on bus
+        # This ensures tools are available when agent metadata is queried
+        if hasattr(self, '_mcp_providers') and self._mcp_providers:
+            logger.info(f"[{self.config.name}] Connecting to {len(self._mcp_providers)} MCP server(s) before bus registration...")
+            try:
+                # Use timeout to prevent indefinite blocking, but wait for connection
+                await asyncio.wait_for(self._ensure_mcp_tools_registered(), timeout=15.0)
+                logger.info(f"[{self.config.name}] ✓ MCP tools connected and registered")
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.config.name}] MCP connection timed out after 15s, continuing without MCP tools")
+            except Exception as e:
+                logger.warning(f"[{self.config.name}] MCP connection failed: {e}, continuing without MCP tools")
+        
         metadata = {
             "role": self.config.role or self.ROLE,
             "goal": self.config.goal or self.GOAL,
@@ -463,6 +510,14 @@ class Agent:
                 await self._heartbeat_task
             except asyncio.CancelledError:
                 pass
+
+        # Disconnect MCP providers
+        if hasattr(self, '_mcp_providers') and self._mcp_providers:
+            for provider in self._mcp_providers:
+                try:
+                    await provider.disconnect()
+                except Exception as e:
+                    logger.debug(f"Error disconnecting MCP provider: {e}")
 
         # Update status to inactive
         metadata = {
@@ -758,6 +813,68 @@ class Agent:
     #     """Execute a custom step (override in subclass)."""
     #     return {"error": "Custom step not implemented"}
 
+    async def _ensure_mcp_tools_registered(self) -> None:
+        """Ensure MCP providers are connected and tools are registered."""
+        if not hasattr(self, '_mcp_providers') or not self._mcp_providers:
+            logger.debug(f"[{self.config.name}] No MCP providers configured")
+            return
+        
+        logger.debug(f"[{self.config.name}] Ensuring MCP tools are registered from {len(self._mcp_providers)} provider(s)")
+        
+        for provider in self._mcp_providers:
+            try:
+                # Check connection status
+                if not provider.is_connected():
+                    logger.info(f"[{self.config.name}] Connecting to MCP server: {provider.server_name}")
+                    try:
+                        await provider.connect()
+                        logger.info(f"[{self.config.name}] ✓ Connected to MCP server: {provider.server_name}")
+                    except Exception as conn_err:
+                        logger.error(f"[{self.config.name}] Failed to connect to MCP server {provider.server_name}: {conn_err}", exc_info=True)
+                        # Don't raise - allow agent to continue without MCP tools
+                        continue
+                else:
+                    logger.debug(f"[{self.config.name}] MCP server {provider.server_name} already connected")
+                
+                # Register tools - this is idempotent (won't re-register if already registered)
+                logger.debug(f"[{self.config.name}] Registering MCP tools from server: {provider.server_name}")
+                
+                # Get tools count before registration
+                tools_before = len(self.tools.list_names())
+                try:
+                    await provider.register_tools(self.tools)
+                except Exception as reg_err:
+                    logger.error(f"[{self.config.name}] Failed to register MCP tools from {provider.server_name}: {reg_err}", exc_info=True)
+                    # Don't raise - allow agent to continue
+                    continue
+                
+                tools_after = len(self.tools.list_names())
+                added_count = tools_after - tools_before
+                
+                if added_count > 0:
+                    logger.info(f"[{self.config.name}] ✓ Registered {added_count} MCP tools from {provider.server_name} (total: {tools_after})")
+                else:
+                    logger.debug(f"[{self.config.name}] MCP tools from {provider.server_name} already registered (total: {tools_after})")
+                
+                # Verify registration by checking tool registry
+                try:
+                    tools = await provider.discover_tools()
+                    expected_tool_names = [f"{provider.server_name}_{t.get('name')}" for t in tools if t.get('name')]
+                    actual_tool_names = [name for name in self.tools.list_names() if name.startswith(f"{provider.server_name}_")]
+                    
+                    if len(actual_tool_names) < len(expected_tool_names):
+                        missing = set(expected_tool_names) - set(actual_tool_names)
+                        logger.warning(f"[{self.config.name}] Some MCP tools not registered from {provider.server_name}! Missing: {list(missing)[:5]}")
+                    else:
+                        logger.debug(f"[{self.config.name}] ✓ All {len(actual_tool_names)} MCP tools from {provider.server_name} are registered")
+                except Exception as verify_err:
+                    logger.warning(f"[{self.config.name}] Could not verify MCP tool registration: {verify_err}")
+                    # Non-fatal - continue
+            except Exception as e:
+                logger.error(f"[{self.config.name}] Error with MCP provider {provider.server_name}: {e}", exc_info=True)
+                # Don't raise - allow agent to continue without this MCP provider
+                continue
+
     async def call_tool(
         self,
         name: str,
@@ -775,8 +892,15 @@ class Agent:
         Returns:
             Tool execution result
         """
+        # Ensure MCP tools are registered before calling
+        await self._ensure_mcp_tools_registered()
+        
+        # Check if tool exists after registration
         tool = self.tools.get(name)
         if not tool:
+            # Log available tools for debugging
+            available = self.tools.list_names()
+            logger.error(f"[{self.config.name}] Tool '{name}' not found! Available tools ({len(available)}): {available[:15]}")
             raise ValueError(f"Tool not found: {name}")
 
         # Cache key
@@ -826,14 +950,12 @@ class Agent:
         # Execute
         start = time.time()
         try:
-            # DEBUG: Check current_job_id before tool execution
-            import sys
-            print(f"[TOOL EXECUTION] Tool={name}, agent_id={id(self)}, agent_name={self.config.name}, agent.current_job_id={self.current_job_id}", file=sys.stderr, flush=True)
-            
             # Inject current_job_id for system delegation tools if not already provided
-            if name in ['system_delegate_task', 'system_delegate_parallel'] and 'parent_job_id' not in validated_params:
+            # Include custom overrides like system_batch_delegate
+            delegation_tools = ['system_delegate_task', 'system_delegate_parallel', 'system_batch_delegate']
+            if name in delegation_tools and 'parent_job_id' not in validated_params:
                 validated_params['parent_job_id'] = self.current_job_id
-                print(f"[TOOL INJECTION] Injecting parent_job_id={self.current_job_id} into {name}", file=sys.stderr, flush=True)
+                logger.debug(f"Injecting parent_job_id={self.current_job_id} into {name}")
             
             result = tool.invoke(**validated_params)
             # If tool is async, await its result
@@ -1026,34 +1148,66 @@ class Agent:
         # Check nested data.query for delegated tasks that wrap query in data field
         task_description = (
             task.get('query')
-            # ignore below line just experimenting
-            # or (task.get('data', {}).get('query') if isinstance(task.get('data'), dict) else None)
+            or (task.get('data', {}).get('query') if isinstance(task.get('data'), dict) else None)
             or task.get('message')
             or task.get('task')
             or task.get('description')
             or json.dumps(task)
         )
         
-        # Available actions
-        available_tools = self.tools.list_names()
+        # MCP tools should already be connected (from connect_bus)
+        # Just verify they're registered - this should be fast since connection is already established
+        # Do this BEFORE any traces to avoid blocking the first trace
+        if hasattr(self, '_mcp_providers') and self._mcp_providers:
+            # Quick check - if not connected, try to connect with short timeout
+            # But don't block - if it takes too long, continue without MCP tools
+            try:
+                await asyncio.wait_for(self._ensure_mcp_tools_registered(), timeout=1.0)
+            except (asyncio.TimeoutError, Exception) as e:
+                logger.debug(f"[{self.config.name}] MCP tools check: {e}, continuing without MCP tools")
+        
+        # If task has a 'data' field with structured information (like PDF info), include it in the description
+        task_data = task.get('data', {})
+        if task_data and isinstance(task_data, dict):
+            # Include task data in description so LLM can access it
+            if 'pdf' in task_data or 'query' in task_data:
+                task_data_str = json.dumps(task_data, indent=2)
+                task_description = f"{task_description}\n\nTASK DATA:\n{task_data_str}"
         
         # Check if delegation is explicitly disabled in task
         task_allow_delegation = task.get('_allow_delegation', True)
         can_delegate = self.config.allow_delegation and task_allow_delegation
-        
-        # Build available agents list for delegation
-        available_agents = []
-        if can_delegate:
-            try:
-                agents_info = await self.bus.list_agents()
-                available_agents = [
-                    a for a in agents_info 
-                    if a.get("name") != self.config.name and a.get("status") == "active"
-                ]
-            except Exception:
-                pass
 
         for iteration in range(start_iteration, max_iter):
+            # Ensure MCP tools are registered before each iteration
+            # This is critical - tools might be registered late or connection might be lost
+            # Use asyncio.wait_for with timeout to prevent long blocking delays
+            try:
+                await asyncio.wait_for(self._ensure_mcp_tools_registered(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning(f"[{self.config.name}] MCP tool registration timed out after 5s, continuing without MCP tools")
+            except Exception as e:
+                logger.warning(f"[{self.config.name}] MCP tool registration failed: {e}, continuing without MCP tools")
+            
+            # Refresh available tools list on each iteration to ensure MCP tools are included
+            available_tools = self.tools.list_names()
+            if iteration == start_iteration:
+                logger.info(f"[{self.config.name}] Available tools ({len(available_tools)}): {available_tools[:10]}...")
+                filesystem_tools = [t for t in available_tools if 'filesystem' in t]
+                logger.info(f"[{self.config.name}] Filesystem tools available: {filesystem_tools[:5] if filesystem_tools else 'NONE'}")
+            
+            # Build available agents list for delegation
+            available_agents = []
+            if can_delegate:
+                try:
+                    agents_info = await self.bus.list_agents()
+                    available_agents = [
+                        a for a in agents_info 
+                        if a.get("name") != self.config.name and a.get("status") == "active"
+                    ]
+                except Exception:
+                    pass
+            
             # Cooperative cancellation: check before each iteration
             try:
                 if self.current_job_id and hasattr(self.bus, "is_canceled"):
@@ -1173,8 +1327,41 @@ class Agent:
                 query_key = f"{tool_name}:{json.dumps(tool_params, sort_keys=True)}"
                 is_duplicate = False
                 
+                # Check for exact duplicate tool calls (same tool + same params)
+                if query_key in seen_queries:
+                    logger.info(
+                        "[%s] Skipping exact duplicate tool call: %s with params %s",
+                        self.config.name,
+                        tool_name,
+                        tool_params
+                    )
+                    # Check if we have a successful result from the previous call
+                    for prev_entry in history:
+                        if (prev_entry.get("action") == "tool" and 
+                            prev_entry.get("tool") == tool_name and
+                            prev_entry.get("params") == tool_params and
+                            "result" in prev_entry and
+                            "error" not in prev_entry):
+                            history.append({
+                                "action": "tool",
+                                "tool": tool_name,
+                                "params": tool_params,
+                                "result": f"Skipped: exact duplicate of previous call. Previous result: {str(prev_entry.get('result'))[:200]}..."
+                            })
+                            is_duplicate = True
+                            break
+                    if not is_duplicate:
+                        # No previous successful result found, but still a duplicate - skip it
+                        history.append({
+                            "action": "tool",
+                            "tool": tool_name,
+                            "params": tool_params,
+                            "result": "Skipped: exact duplicate tool call (already attempted)"
+                        })
+                        is_duplicate = True
+                
                 # For web_search, use aggressive deduplication to catch semantic duplicates
-                if tool_name == "web_search" and "query" in tool_params:
+                elif tool_name == "web_search" and "query" in tool_params:
                     normalized_query = tool_params["query"].lower().strip()
                     # Remove common filler words to catch semantic similarity
                     filler_words = ["the", "a", "an", "and", "or", "but", "full", "complete", "official", "list"]
@@ -1438,9 +1625,13 @@ Provide a clear, complete final answer based on this information."""
         tool_docs = []
         
         # Get all tools (both user-defined and system tools are in the same registry)
-        for tool_name in self.tools.list_names():
+        all_tool_names = self.tools.list_names()
+        logger.debug(f"[{self.config.name}] Building tool documentation for {len(all_tool_names)} tools: {sorted(all_tool_names)}")
+        
+        for tool_name in all_tool_names:
             tool = self.tools.get(tool_name)
             if not tool:
+                logger.warning(f"[{self.config.name}] Tool {tool_name} found in list but get() returned None")
                 continue
             
             try:
@@ -1455,6 +1646,10 @@ Provide a clear, complete final answer based on this information."""
                 params = schema.get("parameters", {})
                 properties = params.get("properties", {})
                 required = params.get("required", [])
+                
+                # Log schema info for MCP tools
+                if tool.parameters_schema and tool_name.startswith(("filesystem_", "google_sheets_")):
+                    logger.debug(f"[{self.config.name}] MCP tool {tool_name} schema: {len(properties)} properties, {len(required)} required")
                 
                 if properties:
                     doc_parts.append("Parameters:")
@@ -1485,12 +1680,15 @@ Provide a clear, complete final answer based on this information."""
                 )
                 
                 tool_docs.append("\n".join(doc_parts))
+                logger.debug(f"[{self.config.name}] Documented tool {tool_name} with {len(properties)} parameters")
             except Exception as e:
                 # If schema generation fails, still include the tool with basic info
-                logger.warning(f"Failed to generate schema for tool {tool_name}: {e}")
+                logger.warning(f"[{self.config.name}] Failed to generate schema for tool {tool_name}: {e}", exc_info=True)
                 tool_docs.append(f"### {tool_name}\nDescription: {tool.description}\nParameters: (schema generation failed)")
         
-        return "\n\n".join(tool_docs) if tool_docs else "None"
+        result = "\n\n".join(tool_docs) if tool_docs else "None"
+        logger.debug(f"[{self.config.name}] Tool documentation built: {len(tool_docs)} tools documented")
+        return result
     
     def _build_autonomous_system_prompt(
         self,

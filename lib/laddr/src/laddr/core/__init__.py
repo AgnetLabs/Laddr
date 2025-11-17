@@ -10,9 +10,8 @@ Exports:
 - Message bus: RedisBus, MemoryBus
 - Tool registry: ToolRegistry, discover_tools, bind_tools
 - System tools: TaskDelegationTool, ParallelDelegationTool, ArtifactStorageTool
+- MCP: MCPToolProvider, MultiMCPToolProvider, MCPClient
 """
-# NOTE: MCP feature disabled for this release
-# - MCP: MCPToolSource, MCPToolRegistry
 
 from .agent_runtime import Agent, AgentMemory
 from .cache import InMemoryCache, RedisCache
@@ -37,8 +36,8 @@ from .database import (
 )
 from .llm import AnthropicLLM, GeminiLLM, NoOpLLM, OpenAILLM
 
-# MCP feature disabled for this release
-# from .mcp_client import MCPToolRegistry, MCPToolSource
+from .mcp_client import MCPClient, MCPError, MCPTransport
+from .mcp_tools import MCPToolProvider, MultiMCPToolProvider
 
 from .message_bus import MemoryBus, RedisBus, ResponseMessage, TaskMessage
 from .runtime_entry import AgentRunner, WorkerRunner, run_agent
@@ -58,7 +57,7 @@ from .tooling import (
     bind_tools,
     create_tool_schema,
     discover_tools,
-    # register_mcp_tools,  # MCP disabled for this release
+    register_mcp_tools,
     tool,
 )
 
@@ -74,8 +73,6 @@ __all__ = [
     "run_agent",
     # Decorators
     "tool",
-    # Workflow
-    "Workflow",
     # Configuration
     "LaddrConfig",
     "AgentConfig",
@@ -99,7 +96,7 @@ __all__ = [
     "ToolRegistry",
     "discover_tools",
     "bind_tools",
-    # "register_mcp_tools",  # MCP disabled for this release
+    "register_mcp_tools",
     "create_tool_schema",
     # System tools - base classes for user extensions
     "TaskDelegationTool",
@@ -110,9 +107,12 @@ __all__ = [
     "list_tool_overrides",
     "clear_tool_overrides",
     "create_system_tools",
-    # MCP - disabled for this release
-    # "MCPToolSource",
-    # "MCPToolRegistry",
+    # MCP
+    "MCPToolProvider",
+    "MultiMCPToolProvider",
+    "MCPClient",
+    "MCPError",
+    "MCPTransport",
     # Backend protocols
     "QueueBackend",
     "DatabaseBackend",

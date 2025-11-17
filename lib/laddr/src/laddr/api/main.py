@@ -19,6 +19,9 @@ import logging
 import time
 from typing import Any
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 try:
     import docker
     DOCKER_AVAILABLE = True
@@ -36,10 +39,6 @@ from laddr.core import (
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 
 # Request/Response models
@@ -92,12 +91,14 @@ config: LaddrConfig
 factory: BackendFactory
 database: Any
 message_bus: Any
+_db_executor: Any = None  # ThreadPoolExecutor for non-blocking DB calls
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Initialize and cleanup services."""
-    global config, factory, database, message_bus
+    global config, factory, database, message_bus, _db_executor
+    from concurrent.futures import ThreadPoolExecutor
 
     # Load configuration
     config = LaddrConfig()
@@ -110,11 +111,18 @@ async def lifespan(app: FastAPI):
     # Create database tables
     database.create_tables()
 
+    # Create thread pool executor for non-blocking database operations
+    _db_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="db")
+
     logger.info("Laddr API server started")
     logger.info(f"Database: {config.database_url}")
     logger.info(f"Queue: {config.queue_backend}")
 
     yield
+
+    # Shutdown executor
+    if _db_executor:
+        _db_executor.shutdown(wait=True)
 
     logger.info("Laddr API server shutting down")
 
@@ -430,10 +438,15 @@ async def submit_prompt(request: SubmitPromptRequest):
 
                 # Normalize success to 'completed'
                 prompt_status = "completed" if status == "success" else status
-                database.save_prompt_result(pid, outputs, status=prompt_status)
+                # Sanitize outputs before saving to prevent JSON serialization errors
+                from laddr.core.runtime_entry import _sanitize_for_json
+                sanitized_outputs = _sanitize_for_json(outputs)
+                database.save_prompt_result(pid, sanitized_outputs, status=prompt_status)
             except Exception as e:
                 logger.exception("Background prompt run failed")
-                database.save_prompt_result(pid, {"error": str(e)}, status="failed")
+                from laddr.core.runtime_entry import _sanitize_for_json
+                sanitized_error = _sanitize_for_json({"error": str(e)})
+                database.save_prompt_result(pid, sanitized_error, status="failed")
 
         # Fire-and-forget background task
         asyncio.create_task(_run_in_background(prompt_id))
@@ -637,6 +650,31 @@ async def get_agent_tools(agent_name: str):
             agent_instance = getattr(agent_module, agent_name, None)
             
             if agent_instance and hasattr(agent_instance, 'tools'):
+                # Ensure MCP tools are registered if agent has MCP providers
+                # This is needed because MCP tools are registered asynchronously
+                if hasattr(agent_instance, '_mcp_providers') and agent_instance._mcp_providers:
+                    try:
+                        # Directly register MCP tools without requiring full agent initialization
+                        # This works even if agent hasn't called connect_bus() yet
+                        for provider in agent_instance._mcp_providers:
+                            if not provider.is_connected():
+                                try:
+                                    await asyncio.wait_for(provider.connect(), timeout=5.0)
+                                except Exception as conn_err:
+                                    logger.debug(f"Could not connect to MCP server {provider.server_name}: {conn_err}")
+                                    continue
+                            
+                            # Register tools directly into the agent's tool registry
+                            try:
+                                await asyncio.wait_for(
+                                    provider.register_tools(agent_instance.tools),
+                                    timeout=3.0
+                                )
+                            except Exception as reg_err:
+                                logger.debug(f"Could not register MCP tools from {provider.server_name}: {reg_err}")
+                    except Exception as e:
+                        logger.debug(f"Could not register MCP tools for API query: {e}")
+                
                 tools_list = []
                 # Check if tools is a ToolRegistry
                 if hasattr(agent_instance.tools, 'list'):
@@ -1238,8 +1276,14 @@ async def websocket_prompt_traces(websocket: WebSocket, prompt_id: str):
     
     Sends hierarchical trace spans similar to LangSmith/Langfuse structure.
     """
-    await websocket.accept()
-    logger.info(f"WebSocket connected for prompt {prompt_id}")
+    try:
+        await websocket.accept()
+        logger.info(f"WebSocket connected for prompt {prompt_id}")
+        # Small delay to ensure connection is fully established
+        await asyncio.sleep(0.01)
+    except Exception as e:
+        logger.error(f"Failed to accept WebSocket connection for {prompt_id}: {e}", exc_info=True)
+        return
     
     last_trace_id = 0
     
@@ -1342,10 +1386,94 @@ async def websocket_prompt_traces(websocket: WebSocket, prompt_id: str):
         else:
             return 'event'
     
+    # Get event loop once for all executor calls
+    loop = asyncio.get_running_loop()
+    last_trace_id = 0
+    is_complete = False
+    
+    # Helper to safely send WebSocket messages
+    async def safe_send(data: dict) -> bool:
+        try:
+            # Try to send - if connection is closed, it will raise an exception
+            await websocket.send_json(data)
+            logger.debug(f"Sent WebSocket message type={data.get('type')} for prompt {prompt_id}")
+            return True
+        except RuntimeError as e:
+            # RuntimeError usually means connection is closed
+            if "closed" in str(e).lower() or "disconnect" in str(e).lower():
+                logger.debug(f"WebSocket connection closed for prompt {prompt_id}")
+            else:
+                logger.warning(f"RuntimeError sending WebSocket message for prompt {prompt_id}: {e}")
+            return False
+        except Exception as e:
+            logger.warning(f"Failed to send WebSocket message for prompt {prompt_id}: {e}", exc_info=True)
+            return False
+    
+    # Load initial traces immediately on connection
+    # Note: For prompt executions, prompt_id is used as job_id
     try:
-        while True:
-            # Get all traces for this prompt/job
-            traces = database.get_job_traces(prompt_id)
+        initial_traces = await loop.run_in_executor(_db_executor, database.get_job_traces, prompt_id)
+        logger.info(f"Loaded {len(initial_traces)} initial traces for prompt {prompt_id} (using as job_id)")
+        if initial_traces:
+            last_trace_id = max(t.get('id', 0) for t in initial_traces)
+            trace_tree = _build_trace_tree(initial_traces)
+            logger.info(f"Built trace tree with {len(trace_tree)} root spans for prompt {prompt_id}")
+            sent = await safe_send({
+                "type": "traces",
+                "data": {
+                    "spans": trace_tree,
+                    "count": len(initial_traces)
+                }
+            })
+            if sent:
+                logger.info(f"Successfully sent {len(initial_traces)} initial traces for prompt {prompt_id}")
+            else:
+                logger.warning(f"Failed to send initial traces for prompt {prompt_id} - connection may be closed")
+        else:
+            logger.info(f"No initial traces found for prompt {prompt_id}")
+            # Send empty traces to let frontend know we're connected
+            await safe_send({
+                "type": "traces",
+                "data": {
+                    "spans": [],
+                    "count": 0
+                }
+            })
+    except Exception as e:
+        logger.error(f"Failed to load initial traces for {prompt_id}: {e}", exc_info=True)
+    
+    # Check initial completion status
+    try:
+        prompt_result = await loop.run_in_executor(_db_executor, database.get_prompt_result, prompt_id)
+        if prompt_result and prompt_result.get('status') in ['completed', 'failed', 'error', 'canceled']:
+            is_complete = True
+            logger.info(f"Prompt {prompt_id} is already {prompt_result.get('status')}, sending completion event")
+            # Send completion event with final tree (all traces)
+            all_traces = await loop.run_in_executor(_db_executor, database.get_job_traces, prompt_id)
+            final_tree = _build_trace_tree(all_traces)
+            sent = await safe_send({
+                "type": "complete",
+                "data": {
+                    "status": prompt_result.get('status'),
+                    "outputs": prompt_result.get('outputs'),
+                    "error": prompt_result.get('error'),
+                    "spans": final_tree
+                }
+            })
+            if sent:
+                logger.info(f"Sent completion event for prompt {prompt_id}, closing WebSocket")
+            else:
+                logger.warning(f"Failed to send completion event for prompt {prompt_id}")
+            return
+    except Exception as e:
+        logger.warning(f"Failed to check prompt status for {prompt_id}: {e}", exc_info=True)
+    
+    # Poll for new traces while prompt is running
+    try:
+        while not is_complete:
+            # Get all traces for this prompt/job (non-blocking)
+            # Note: For prompt executions, prompt_id is used as job_id
+            traces = await loop.run_in_executor(_db_executor, database.get_job_traces, prompt_id)
             
             # Filter to only new traces
             new_traces = [t for t in traces if t.get('id', 0) > last_trace_id]
@@ -1357,23 +1485,31 @@ async def websocket_prompt_traces(websocket: WebSocket, prompt_id: str):
                 # Build hierarchical tree structure
                 trace_tree = _build_trace_tree(new_traces)
                 
+                logger.debug(f"Sending {len(new_traces)} new traces ({len(trace_tree)} root spans) for prompt {prompt_id}")
+                
                 # Send tree structure to client
-                await websocket.send_json({
+                sent = await safe_send({
                     "type": "traces",
                     "data": {
                         "spans": trace_tree,
                         "count": len(new_traces)
                     }
                 })
+                if sent:
+                    logger.debug(f"Successfully sent {len(new_traces)} new traces for prompt {prompt_id}")
+                else:
+                    logger.warning(f"Failed to send new traces for prompt {prompt_id} - connection may be closed")
             
-            # Check if prompt is complete
-            prompt_result = database.get_prompt_result(prompt_id)
+            # Check if prompt is complete (non-blocking)
+            prompt_result = await loop.run_in_executor(_db_executor, database.get_prompt_result, prompt_id)
             if prompt_result and prompt_result.get('status') in ['completed', 'failed', 'error', 'canceled']:
-                # Send completion event with final tree
-                all_traces = database.get_job_traces(prompt_id)
+                is_complete = True
+                logger.info(f"Prompt {prompt_id} completed with status {prompt_result.get('status')}")
+                # Send completion event with final tree (all traces)
+                all_traces = await loop.run_in_executor(_db_executor, database.get_job_traces, prompt_id)
                 final_tree = _build_trace_tree(all_traces)
                 
-                await websocket.send_json({
+                await safe_send({
                     "type": "complete",
                     "data": {
                         "status": prompt_result.get('status'),
@@ -1391,7 +1527,7 @@ async def websocket_prompt_traces(websocket: WebSocket, prompt_id: str):
     except WebSocketDisconnect:
         logger.info(f"WebSocket client disconnected for prompt {prompt_id}")
     except Exception as e:
-        logger.error(f"WebSocket error for prompt {prompt_id}: {e}")
+        logger.error(f"WebSocket error for prompt {prompt_id}: {e}", exc_info=True)
         try:
             await websocket.send_json({
                 "type": "error",

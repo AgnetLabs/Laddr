@@ -22,6 +22,8 @@ from laddr.core import (
     DatabaseService,
     LaddrConfig,
     MemoryBus,
+    MCPToolProvider,
+    MultiMCPToolProvider,
     RedisBus,
     ToolRegistry,
     discover_tools,
@@ -114,6 +116,9 @@ __all__ = [
     "MemoryBus",
     "ToolRegistry",
     "discover_tools",
+    # MCP
+    "MCPToolProvider",
+    "MultiMCPToolProvider",
     # Tool override system
     "override_system_tool",
     "list_tool_overrides",

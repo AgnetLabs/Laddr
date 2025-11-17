@@ -12,8 +12,11 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 import importlib
 import inspect
+import logging
 import pkgutil
 from typing import Any, get_type_hints
+
+logger = logging.getLogger(__name__)
 
 
 try:
@@ -253,7 +256,9 @@ def discover_tools(agent_name: str) -> ToolRegistry:
                             registry.register(obj)
                         elif name == "run" and callable(obj):
                             registry.register(obj)
-                except Exception:
+                except Exception as e:
+                    # Log but don't fail - one bad module shouldn't break tool discovery
+                    logger.debug(f"Failed to load tool module {module_name}: {e}")
                     continue
     except ImportError:
         pass
@@ -310,56 +315,26 @@ def bind_tools(agent_instance: Any, tools: list[str | Callable]) -> None:
             raise ValueError(f"Tool must be string or callable, got {type(tool_ref)}")
 
 
-# MCP feature disabled for this release
-# def register_mcp_tools(agent_instance: Any, mcp_source: Any) -> None:
-#     """
-#     Register MCP-discovered tools to an agent instance.
-#     
-#     Fetches tools from MCPToolSource and wraps them as callables.
-#     
-#     Usage:
-#         from laddr.core.mcp_client import MCPToolSource
-#         mcp = MCPToolSource("http://localhost:3000", api_key="...")
-#         register_mcp_tools(self, mcp)
-#     
-#     Args:
-#         agent_instance: Agent instance with .tools registry
-#         mcp_source: MCPToolSource instance
-#     """
-#     import asyncio
-#     
-#     if not hasattr(agent_instance, "tools"):
-#         raise AttributeError("Agent must have .tools ToolRegistry")
-#     
-#     # Discover tools from MCP server
-#     try:
-#         tools_metadata = asyncio.run(mcp_source.discover())
-#     except Exception as e:
-#         raise RuntimeError(f"Failed to discover MCP tools: {e}")
-#     
-#     # Wrap each MCP tool as a callable
-#     for tool_meta in tools_metadata:
-#         tool_name = tool_meta.get("name")
-#         tool_desc = tool_meta.get("description", "")
-#         
-#         # Create async wrapper
-#         async def mcp_tool_wrapper(**kwargs):
-#             return await mcp_source.call_tool(tool_name, kwargs)
-#         
-#         # Create sync wrapper for compatibility
-#         def sync_wrapper(**kwargs):
-#             return asyncio.run(mcp_tool_wrapper(**kwargs))
-#         
-#         sync_wrapper.__name__ = tool_name
-#         sync_wrapper.__doc__ = tool_desc
-#         
-#         # Register as tool
-#         tool_obj = Tool(
-#             name=tool_name,
-#             func=sync_wrapper,
-#             description=tool_desc
-#         )
-#         agent_instance.tools.register(tool_obj)
+async def register_mcp_tools(registry: ToolRegistry, mcp_provider: Any) -> None:
+    """
+    Register MCP-discovered tools into a ToolRegistry.
+    
+    Fetches tools from MCPToolProvider or MultiMCPToolProvider and registers them.
+    
+    Usage:
+        from laddr.core.mcp_tools import MCPToolProvider
+        mcp = MCPToolProvider(command="npx -y @modelcontextprotocol/server-filesystem /path")
+        await register_mcp_tools(agent.tools, mcp)
+    
+    Args:
+        registry: ToolRegistry instance to register tools into
+        mcp_provider: MCPToolProvider or MultiMCPToolProvider instance
+    """
+    if not isinstance(registry, ToolRegistry):
+        raise TypeError("registry must be a ToolRegistry instance")
+    
+    # Register tools (async method)
+    await mcp_provider.register_tools(registry)
 
 
 def _python_type_to_json_type(python_type) -> dict:
@@ -433,6 +408,8 @@ def create_tool_schema(tool: Tool) -> dict[str, Any]:
     
     Returns OpenAI-style function schema.
     Automatically filters runtime-injected parameters (_message_bus, _artifact_storage, _agent).
+    
+    For MCP tools, uses the pre-set parameters_schema from the MCP tool definition.
     """
     # Runtime-injected parameters that should be filtered from schema
     RUNTIME_PARAMS = {"_message_bus", "_artifact_storage", "_agent", "self", "cls"}
@@ -446,6 +423,30 @@ def create_tool_schema(tool: Tool) -> dict[str, Any]:
             "required": []
         }
     }
+
+    # If parameters_schema is already set (e.g., from MCP tool definition), use it
+    if tool.parameters_schema and isinstance(tool.parameters_schema, dict):
+        # MCP tools provide their schema directly - use it
+        # MCP inputSchema format: {"type": "object", "properties": {...}, "required": [...]}
+        if "type" in tool.parameters_schema and tool.parameters_schema.get("type") == "object":
+            # It's already in the right format
+            schema["parameters"] = tool.parameters_schema
+        elif "properties" in tool.parameters_schema:
+            # Has properties, wrap in object type
+            schema["parameters"] = {
+                "type": "object",
+                "properties": tool.parameters_schema.get("properties", {}),
+                "required": tool.parameters_schema.get("required", [])
+            }
+        else:
+            # Treat as properties dict directly
+            schema["parameters"] = {
+                "type": "object",
+                "properties": tool.parameters_schema,
+                "required": []
+            }
+        logger.debug(f"Using pre-set parameters_schema for tool {tool.name}: {len(schema['parameters'].get('properties', {}))} properties")
+        return schema
 
     # Try to extract parameters from input_model or function signature
     if tool.input_model and BaseModel and issubclass(tool.input_model, BaseModel):

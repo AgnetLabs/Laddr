@@ -11,9 +11,12 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
+import logging
 import time
 from typing import Any
 import uuid
+
+logger = logging.getLogger(__name__)
 
 
 try:
@@ -172,7 +175,7 @@ class RedisBus:
                 (threshold_kb == 0 or len(payload_bytes) > threshold_kb * 1024)
             )
             
-            print(f"[STORAGE] Checking offload: storage={storage is not None}, threshold={threshold_kb}, size={len(payload_bytes)}, should_offload={should_offload}")
+            logger.debug(f"Checking offload: storage={storage is not None}, threshold={threshold_kb}, size={len(payload_bytes)}, should_offload={should_offload}")
             
             if should_offload:
                 # Build a key with date prefix for grouping
@@ -180,10 +183,10 @@ class RedisBus:
                 key = f"responses/{date_prefix}/{task_id}.json"
                 metadata = {"content-type": "application/json"}
                 try:
-                    print(f"[STORAGE] Offloading to {bucket}/{key} (size={len(payload_bytes)} bytes)")
+                    logger.debug(f"Offloading to {bucket}/{key} (size={len(payload_bytes)} bytes)")
                     await storage.ensure_bucket(bucket)
                     await storage.put_object(bucket, key, payload_bytes, metadata=metadata)
-                    print(f"[STORAGE] ✓ Successfully offloaded to {bucket}/{key}")
+                    logger.info(f"Successfully offloaded to {bucket}/{key}")
                     response = {
                         "task_id": task_id,
                         "offloaded": True,
@@ -193,12 +196,10 @@ class RedisBus:
                     }
                 except Exception as e:
                     # Fallback: keep inline if storage fails
-                    print(f"[STORAGE] ✗ Failed to offload: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.error(f"Failed to offload: {e}", exc_info=True)
                     pass
         except Exception as e:
-            print(f"[STORAGE] Error in offload logic: {e}")
+            logger.error(f"Error in offload logic: {e}", exc_info=True)
             pass
 
         # Store response
@@ -456,7 +457,7 @@ class MemoryBus:
         """Wait for a response published via publish_response."""
         if task_id in self._responses:
             return self._responses[task_id]
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future = asyncio.get_running_loop().create_future()
         self._waiters.setdefault(task_id, []).append(fut)
         try:
             return await asyncio.wait_for(fut, timeout=timeout_sec)
@@ -514,20 +515,20 @@ class KafkaBus:
 
     async def _get_producer(self) -> Any:
         if self._producer is None:
-            print(f"[KafkaBus] Creating Kafka producer for {self.bootstrap_servers}")
+            logger.info(f"Creating Kafka producer for {self.bootstrap_servers}")
             self._producer = AIOKafkaProducer(
                 bootstrap_servers=self.bootstrap_servers,
                 acks='all',  # Wait for all replicas to acknowledge
                 max_request_size=10485760,  # 10MB max message size
             )
             await self._producer.start()
-            print(f"[KafkaBus] Producer started successfully")
+            logger.info("Producer started successfully")
         return self._producer
 
     async def _get_consumer(self, agent_name: str) -> Any:
         """Get or create a persistent consumer for the agent."""
         if agent_name not in self._consumers:
-            print(f"[KafkaBus] Creating consumer for agent: {agent_name}")
+            logger.info(f"Creating consumer for agent: {agent_name}")
             consumer = AIOKafkaConsumer(
                 f"laddr.tasks.{agent_name}",
                 bootstrap_servers=self.bootstrap_servers,
@@ -537,7 +538,7 @@ class KafkaBus:
                 max_poll_records=10,
             )
             await consumer.start()
-            print(f"[KafkaBus] Consumer started for agent: {agent_name}")
+            logger.info(f"Consumer started for agent: {agent_name}")
             self._consumers[agent_name] = consumer
         return self._consumers[agent_name]
 
@@ -549,25 +550,22 @@ class KafkaBus:
 
     async def publish_task(self, agent_name: str, task: dict) -> str:
         try:
-            print(f"[KafkaBus] Publishing task to agent: {agent_name}")
+            logger.debug(f"Publishing task to agent: {agent_name}")
             producer = await self._get_producer()
-            print(f"[KafkaBus] Producer obtained")
             task_id = str(uuid.uuid4())
             message = TaskMessage(task_id=task_id, agent_name=agent_name, payload=task).to_dict()
             data = json.dumps(message).encode("utf-8")
             topic = f"laddr.tasks.{agent_name}"
-            print(f"[KafkaBus] Sending to topic: {topic}, task_id: {task_id}")
+            logger.debug(f"Sending to topic: {topic}, task_id: {task_id}")
             await producer.send_and_wait(topic, data)
-            print(f"[KafkaBus] Task published successfully: {task_id}")
+            logger.info(f"Task published successfully: {task_id}")
             return task_id
         except Exception as e:
-            print(f"[KafkaBus] ERROR publishing task: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"ERROR publishing task: {e}", exc_info=True)
             raise
 
     async def publish_response(self, task_id: str, response: dict) -> bool:
-        print(f"[KafkaBus] Publishing response for task: {task_id}")
+        logger.debug(f"Publishing response for task: {task_id}")
         
         # Optional offload similar to other buses
         try:
@@ -583,14 +581,14 @@ class KafkaBus:
             )
             
             if should_offload:
-                print(f"[KafkaBus] Offloading response to storage (size: {len(payload_bytes)} bytes)")
+                logger.debug(f"Offloading response to storage (size: {len(payload_bytes)} bytes)")
                 date_prefix = datetime.utcnow().strftime("%Y/%m/%d")
                 key = f"responses/{date_prefix}/{task_id}.json"
                 metadata = {"content-type": "application/json"}
                 try:
                     await storage.ensure_bucket(bucket)
                     await storage.put_object(bucket, key, payload_bytes, metadata=metadata)
-                    print(f"[KafkaBus] Response offloaded to {bucket}/{key}")
+                    logger.info(f"Response offloaded to {bucket}/{key}")
                     response = {
                         "task_id": task_id,
                         "offloaded": True,
@@ -599,10 +597,10 @@ class KafkaBus:
                         "size_bytes": len(payload_bytes),
                     }
                 except Exception as e:
-                    print(f"[KafkaBus] ERROR offloading response: {e}")
+                    logger.error(f"ERROR offloading response: {e}", exc_info=True)
                     pass
         except Exception as e:
-            print(f"[KafkaBus] ERROR in publish_response storage check: {e}")
+            logger.error(f"ERROR in publish_response storage check: {e}", exc_info=True)
             pass
 
         # Notify in-memory waiters
@@ -614,12 +612,12 @@ class KafkaBus:
 
         # Fire-and-forget to responses topic for external consumers
         try:
-            print(f"[KafkaBus] Publishing to laddr.responses topic...")
+            logger.debug("Publishing to laddr.responses topic...")
             producer = await self._get_producer()
             await producer.send_and_wait("laddr.responses", json.dumps(response).encode("utf-8"))
-            print(f"[KafkaBus] Response published to Kafka successfully")
+            logger.debug("Response published to Kafka successfully")
         except Exception as e:
-            print(f"[KafkaBus] ERROR publishing response to Kafka: {e}")
+            logger.error(f"ERROR publishing response to Kafka: {e}", exc_info=True)
             pass
         return True
 
@@ -640,7 +638,7 @@ class KafkaBus:
                 await consumer.commit()
         except Exception as e:
             # Log error but don't crash the worker
-            print(f"Error consuming tasks: {e}")
+            logger.error(f"Error consuming tasks: {e}", exc_info=True)
         return tasks
 
     async def wait_for_response(self, task_id: str, timeout_sec: int) -> dict | None:
@@ -649,7 +647,7 @@ class KafkaBus:
         For Kafka, we need to actually poll the topic since in-memory waiters
         don't work across processes.
         """
-        print(f"[KafkaBus] Waiting for response to task: {task_id}, timeout: {timeout_sec}s")
+        logger.debug(f"Waiting for response to task: {task_id}, timeout: {timeout_sec}s")
         
         # Create a dedicated consumer for this response
         # Use a unique group ID so we read all messages
@@ -664,14 +662,14 @@ class KafkaBus:
         
         try:
             await consumer.start()
-            print(f"[KafkaBus] Consumer started, polling for response...")
+            logger.debug("Consumer started, polling for response...")
             
-            start_time = asyncio.get_event_loop().time()
+            start_time = asyncio.get_running_loop().time()
             while True:
                 # Check timeout
-                elapsed = asyncio.get_event_loop().time() - start_time
+                elapsed = asyncio.get_running_loop().time() - start_time
                 if elapsed >= timeout_sec:
-                    print(f"[KafkaBus] Timeout waiting for response to {task_id}")
+                    logger.warning(f"Timeout waiting for response to {task_id}")
                     return None
                 
                 # Poll for messages
@@ -684,11 +682,11 @@ class KafkaBus:
                                 response_task_id = data.get("task_id")
                                 
                                 if response_task_id == task_id:
-                                    print(f"[KafkaBus] Found response for task {task_id}")
+                                    logger.debug(f"Found response for task {task_id}")
                                     
                                     # Check if response was offloaded to storage
                                     if data.get("offloaded"):
-                                        print(f"[KafkaBus] Response offloaded, retrieving from storage...")
+                                        logger.debug("Response offloaded, retrieving from storage...")
                                         # Retrieve from storage
                                         storage = getattr(self, "_storage", None)
                                         if storage:
@@ -698,17 +696,17 @@ class KafkaBus:
                                                 try:
                                                     stored_data = await storage.get_object(bucket, key)
                                                     actual_response = json.loads(stored_data.decode("utf-8"))
-                                                    print(f"[KafkaBus] Retrieved response from storage")
+                                                    logger.debug("Retrieved response from storage")
                                                     return actual_response
                                                 except Exception as e:
-                                                    print(f"[KafkaBus] Error retrieving from storage: {e}")
+                                                    logger.error(f"Error retrieving from storage: {e}", exc_info=True)
                                                     return data  # Return offload metadata as fallback
                                         return data
                                     else:
                                         # Response is inline
                                         return data
                             except Exception as e:
-                                print(f"[KafkaBus] Error parsing message: {e}")
+                                logger.error(f"Error parsing message: {e}", exc_info=True)
                                 continue
                 except asyncio.TimeoutError:
                     # No messages in this poll, continue waiting
@@ -719,7 +717,7 @@ class KafkaBus:
                 
         finally:
             await consumer.stop()
-            print(f"[KafkaBus] Consumer stopped for task {task_id}")
+            logger.debug(f"Consumer stopped for task {task_id}")
 
     async def get_registered_agents(self) -> dict[str, dict]:
         """

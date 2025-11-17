@@ -56,11 +56,14 @@ All integrations (queue, database, LLM, cache) are configurable.
 
 from pathlib import Path
 from typing import Any, Protocol
+import logging
 import os
 
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 import yaml
+
+logger = logging.getLogger(__name__)
 
 
 class LaddrConfig(BaseSettings):
@@ -122,6 +125,16 @@ class LaddrConfig(BaseSettings):
     storage_bucket: str = Field(
         default="laddr",
         description="Default storage bucket name"
+    )
+
+    # Legacy MinIO field names (backward compatibility - deprecated, use storage_* fields)
+    minio_endpoint: str | None = Field(
+        default=None,
+        description="[DEPRECATED] Use storage_endpoint instead. MinIO endpoint for backward compatibility"
+    )
+    minio_bucket: str | None = Field(
+        default=None,
+        description="[DEPRECATED] Use storage_bucket instead. MinIO bucket name for backward compatibility"
     )
 
     # Tracing and metrics (stored in DB, not external services)
@@ -318,19 +331,17 @@ class BackendFactory:
         # Optionally enable large-response offload to storage
         try:
             if getattr(self.config, "enable_large_response_storage", True):
-                print(f"[STORAGE] Enabling large response storage (threshold={self.config.storage_threshold_kb} KB)")
+                logger.info(f"Enabling large response storage (threshold={self.config.storage_threshold_kb} KB)")
                 storage = self.create_storage_backend()
                 bus._storage = storage
                 # Use new storage_bucket field, fallback to old minio_bucket for compatibility
                 bucket = self.config.storage_bucket or self.config.minio_bucket or "laddr"
                 bus._storage_bucket = bucket
                 bus._storage_threshold_kb = self.config.storage_threshold_kb
-                print(f"[STORAGE] Configured: bucket={bucket}, threshold={self.config.storage_threshold_kb} KB")
+                logger.info(f"Configured: bucket={bucket}, threshold={self.config.storage_threshold_kb} KB")
         except Exception as e:
             # Non-fatal: continue without offload
-            print(f"[STORAGE] Failed to enable storage: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning(f"Failed to enable storage: {e}", exc_info=True)
             pass
 
         return bus

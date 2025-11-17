@@ -32,6 +32,17 @@ class OpenAILLM:
         self.base_url = base_url
         self._client = None
 
+    def _needs_max_completion_tokens(self, model: str) -> bool:
+        """Check if model requires max_completion_tokens instead of max_tokens."""
+        # Models like gpt-5-mini, o1, o3, etc. use max_completion_tokens
+        model_lower = model.lower()
+        return (
+            model_lower.startswith("gpt-5") or
+            model_lower.startswith("o1") or
+            model_lower.startswith("o3") or
+            "mini" in model_lower and "gpt-5" in model_lower
+        )
+
     async def generate(self, prompt: str, system: str | None = None, **kwargs) -> str:
         """Generate response using OpenAI."""
         if not self.api_key:
@@ -40,10 +51,10 @@ class OpenAILLM:
         if self._client is None:
             try:
                 import openai
-                kwargs = {"api_key": self.api_key}
+                client_kwargs = {"api_key": self.api_key}
                 if self.base_url:
-                    kwargs["base_url"] = self.base_url
-                self._client = openai.AsyncOpenAI(**kwargs)
+                    client_kwargs["base_url"] = self.base_url
+                self._client = openai.AsyncOpenAI(**client_kwargs)
             except ImportError:
                 raise RuntimeError("openai package not installed. Install with: pip install openai")
 
@@ -52,12 +63,21 @@ class OpenAILLM:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
-        response = await self._client.chat.completions.create(
-            model=kwargs.get("model", self.default_model),
-            messages=messages,
-            temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 4096)
-        )
+        model_name = kwargs.get("model", self.default_model)
+        create_kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        
+        # Use max_completion_tokens for newer models, max_tokens for older ones
+        max_tokens_value = kwargs.get("max_tokens", 4096)
+        if self._needs_max_completion_tokens(model_name):
+            create_kwargs["max_completion_tokens"] = max_tokens_value
+        else:
+            create_kwargs["max_tokens"] = max_tokens_value
+
+        response = await self._client.chat.completions.create(**create_kwargs)
 
         return response.choices[0].message.content
 
@@ -78,12 +98,22 @@ class OpenAILLM:
         if system:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
-        resp = await self._client.chat.completions.create(
-            model=kwargs.get("model", self.default_model),
-            messages=messages,
-            temperature=kwargs.get("temperature", 0.7),
-            max_tokens=kwargs.get("max_tokens", 4096)
-        )
+        
+        model_name = kwargs.get("model", self.default_model)
+        create_kwargs = {
+            "model": model_name,
+            "messages": messages,
+            "temperature": kwargs.get("temperature", 0.7),
+        }
+        
+        # Use max_completion_tokens for newer models, max_tokens for older ones
+        max_tokens_value = kwargs.get("max_tokens", 4096)
+        if self._needs_max_completion_tokens(model_name):
+            create_kwargs["max_completion_tokens"] = max_tokens_value
+        else:
+            create_kwargs["max_tokens"] = max_tokens_value
+        
+        resp = await self._client.chat.completions.create(**create_kwargs)
         text = resp.choices[0].message.content
         usage = {}
         try:
@@ -94,7 +124,7 @@ class OpenAILLM:
                     "completion_tokens": getattr(u, "completion_tokens", None),
                     "total_tokens": getattr(u, "total_tokens", None),
                     "provider": "openai",
-                    "model": kwargs.get("model", self.default_model),
+                    "model": model_name,
                 }
         except Exception:
             usage = {"provider": "openai"}

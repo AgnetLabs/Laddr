@@ -644,7 +644,77 @@ async def custom_delegation(
 
 ---
 
+## FAQ
 
+### General
+
+**What is Laddr?**
+Laddr is a Python framework for building multi-agent systems where agents communicate, delegate tasks, and execute work in parallel. Think of it as a microservices architecture for AI agents — with built-in message queues, observability, and horizontal scalability.
+
+**How is Laddr different from LangGraph or CrewAI?**
+Laddr is designed for production-grade distributed systems with queue-based messaging (Redis Streams), horizontal scaling, and a built-in observability dashboard. It supports both autonomous coordinator-orchestrator workflows and deterministic sequential pipelines.
+
+**What license does Laddr use?**
+Laddr is open-source under the Apache 2.0 License.
+
+### Setup & Configuration
+
+**How do I install Laddr?**
+```bash
+pip install laddr
+laddr init my-project
+cd my-project
+```
+
+**What are the system requirements?**
+- Python 3.10+
+- Redis 7.0+ (for queue-based messaging)
+- PostgreSQL 15+ (optional, for trace storage)
+- Docker & Docker Compose (recommended for production)
+
+**Can I run Laddr without Docker?**
+Yes. Docker is optional. You can run agents directly with Python, though Docker Compose is recommended for production deployments with Redis and PostgreSQL.
+
+### Architecture
+
+**What are the two operating modes?**
+- **Coordinator-Orchestrator Mode**: Dynamic, autonomous workflows where a coordinator agent analyzes tasks, delegates to specialists, and synthesizes results in real-time.
+- **Sequential Deterministic Workflow Mode**: Pre-defined pipelines where tasks flow through agents in a fixed sequence with explicit inputs, outputs, and dependencies.
+
+**How do agents communicate?**
+Agents communicate via Redis Streams, providing reliable, distributed message queuing with automatic load balancing across workers.
+
+**What is the Dashboard?**
+Laddr includes an interactive web dashboard for monitoring agents, traces, batches, and logs in real-time. It also features a playground for testing agents with live streaming responses.
+
+### Scalability
+
+**How does Laddr handle horizontal scaling?**
+Each agent can be scaled independently with multiple workers. Redis Streams automatically distribute tasks across workers with built-in load balancing and fault tolerance.
+
+**Can agents delegate tasks to other agents?**
+Yes. Built-in delegation allows agents to seamlessly route tasks to other agents, enabling complex multi-step workflows.
+
+### Observability
+
+**What tracing options are available?**
+- Built-in tracing with SQLite (dev) or PostgreSQL (prod) storage
+- Optional Langfuse integration for external tracing with automatic span creation
+- Real-time metrics: job status, duration, success rates, queue depth
+
+### Troubleshooting
+
+**Redis connection fails**
+Ensure Redis 7.0+ is running and accessible. Check your `REDIS_URL` environment variable and network connectivity.
+
+**Agent not starting**
+Verify Python 3.10+ is installed, dependencies are installed (`pip install -r requirements.txt`), and API keys are configured in `.env`.
+
+**Dashboard not loading**
+Ensure the FastAPI runtime is running. The dashboard is served on the default port — check for port conflicts.
+
+**Batch jobs stuck**
+Check the dashboard for queue depth and worker status. Ensure Redis Streams are healthy and workers are not overloaded.
 
 ## License
 

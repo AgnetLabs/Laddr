@@ -59,10 +59,10 @@ class InvalidConfigError(LaddrError):
 class DockerNotFoundError(LaddrError):
     """Raised when Docker is not installed or not running."""
 
-    def __init__(self):
+    def __init__(self, message: str = "Docker not found or not running"):
         super().__init__(
-            "Docker not found or not running",
-            hint="Install Docker (https://docs.docker.com/get-docker/) and ensure it's running",
+            message,
+            hint="Please ensure that Docker is installed and running.",
         )
 
 

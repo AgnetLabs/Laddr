@@ -9,11 +9,49 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import time
+import platform
+import os
 
 import yaml
 
 from .errors import DockerComposeError, DockerNotFoundError
 from .logger import print_info, print_success
+
+
+def is_wsl():
+    """Check if the environment is WSL."""
+    return "microsoft" in platform.uname().release.lower()
+
+
+def _check_docker_daemon():
+    """Check if the Docker daemon is running."""
+    try:
+        result = subprocess.run(
+            ["docker", "version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+            env={"DOCKER_HOST": "unix:///var/run/docker.sock"},
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _check_docker_desktop():
+    """Check if Docker Desktop is running."""
+    try:
+        result = subprocess.run(
+            ["docker", "version"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
 def check_docker() -> bool:
@@ -25,19 +63,42 @@ def check_docker() -> bool:
     Raises:
         DockerNotFoundError: If Docker is not found or not running
     """
-    try:
-        result = subprocess.run(
-            ["docker", "version"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
+    system = platform.system()
+
+    if system == "Linux":
+        if is_wsl():
+            # Windows + WSL
+            if _check_docker_daemon():
+                return True
+            print_info("Docker daemon not found in WSL. Trying Docker Desktop...")
+            if _check_docker_desktop():
+                return True
+            raise DockerNotFoundError(
+                "Docker not found in WSL. Laddr could not connect to the Docker daemon within WSL or to Docker Desktop. Please ensure one of them is installed, running, and configured for WSL."
+            )
+        else:
+            # Linux
+            if _check_docker_daemon():
+                return True
+            print_info("Docker daemon not found. Trying Docker Desktop...")
+            if _check_docker_desktop():
+                return True
+            raise DockerNotFoundError(
+                "Docker not found. Laddr could not connect to the Docker daemon or Docker Desktop. Please ensure one of them is installed and running."
+            )
+    elif system == "Windows":
+        if _check_docker_desktop():
+            return True
+        raise DockerNotFoundError(
+            "Docker Desktop not found. Please ensure that Docker Desktop is installed and running."
         )
-        if result.returncode != 0:
-            raise DockerNotFoundError()
-        return True
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        raise DockerNotFoundError()
+    else:
+        # Other systems
+        if _check_docker_desktop():
+            return True
+        raise DockerNotFoundError(
+            "Docker not found. Please ensure that Docker is installed and running."
+        )
 
 
 def check_docker_compose() -> bool:

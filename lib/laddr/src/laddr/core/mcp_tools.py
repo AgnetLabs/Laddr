@@ -36,6 +36,7 @@ class MCPToolProvider:
         auto_refresh: bool = False,
         api_key: Optional[str] = None,
         server_name: Optional[str] = None,
+        trust_env: bool = False,
     ):
         """
         Initialize MCP tool provider.
@@ -47,10 +48,12 @@ class MCPToolProvider:
             auto_refresh: If True, reconnect and refresh tools on each agent run
             api_key: Optional API key for authenticated servers
             server_name: Optional identifier for this MCP server (used for tool name prefixing)
+            trust_env: Opt in to environment proxy settings for HTTP transport (default False)
         """
         if not command and not url:
             raise ValueError("Either 'command' (for stdio) or 'url' (for http/sse) must be provided")
         
+        self.trust_env = trust_env
         self.command = command
         self.url = url
         self.transport_type = transport
@@ -94,7 +97,7 @@ class MCPToolProvider:
             elif self.transport_type in ("streamable-http", "http"):
                 if not self.url:
                     raise ValueError("url required for http transport")
-                transport = HttpMCPTransport(self.url, self.api_key)
+                transport = HttpMCPTransport(self.url, self.api_key, trust_env=self.trust_env)
             elif self.transport_type == "sse":
                 if not self.url:
                     raise ValueError("url required for SSE transport")

@@ -317,14 +317,17 @@ class StdioMCPTransport(MCPTransport):
 class HttpMCPTransport(MCPTransport):
     """HTTP transport for streamable-http MCP servers."""
     
-    def __init__(self, url: str, api_key: Optional[str] = None):
+    def __init__(self, url: str, api_key: Optional[str] = None, trust_env: bool = False):
         """
         Initialize HTTP transport.
         
         Args:
             url: Server URL (e.g., "https://docs.agno.com/mcp")
             api_key: Optional API key for authentication
+            trust_env: Opt in to aiohttp environment proxy settings (default False)
         """
+        self.trust_env = trust_env
+        self._session_id: Optional[str] = None
         self.url = url.rstrip('/')
         self.api_key = api_key
         self._connected = False
@@ -339,7 +342,7 @@ class HttpMCPTransport(MCPTransport):
             # Try aiohttp first, fallback to httpx
             try:
                 import aiohttp  # type: ignore
-                self._session = aiohttp.ClientSession()
+                self._session = aiohttp.ClientSession(trust_env=self.trust_env)
                 self._is_aiohttp = True
             except ImportError:
                 try:
@@ -365,6 +368,7 @@ class HttpMCPTransport(MCPTransport):
             finally:
                 self._session = None
                 self._connected = False
+                self._session_id = None
     
     async def send(self, message: Dict[str, Any]) -> None:
         """HTTP transport doesn't use send - messages are sent via POST requests."""
@@ -382,7 +386,13 @@ class HttpMCPTransport(MCPTransport):
             raise MCPTransportError("Not connected to MCP server")
         
         try:
-            headers = {"Content-Type": "application/json"}
+            headers = {
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "User-Agent": "laddr/0.9.6",
+            }
+            if self._session_id:
+                headers["Mcp-Session-Id"] = self._session_id
             if self.api_key:
                 headers["Authorization"] = f"Bearer {self.api_key}"
             
@@ -390,11 +400,13 @@ class HttpMCPTransport(MCPTransport):
                 # aiohttp
                 async with self._session.post(self.url, json=message, headers=headers) as resp:  # type: ignore
                     resp.raise_for_status()
+                    self._session_id = resp.headers.get("Mcp-Session-Id", self._session_id)
                     return await resp.json()
             else:
                 # httpx
                 resp = await self._session.post(self.url, json=message, headers=headers)  # type: ignore
                 resp.raise_for_status()
+                self._session_id = resp.headers.get("Mcp-Session-Id", self._session_id)
                 return resp.json()
         except Exception as e:
             raise MCPTransportError(f"HTTP request failed: {e}")

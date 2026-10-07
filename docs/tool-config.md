@@ -235,3 +235,51 @@ curl -X POST http://localhost:8000/api/agents/researcher/chat \
   -H "Content-Type: application/json" \
   -d '{"message": "search for AI trends"}'
 ```
+
+## Optional Parallel Search MCP example
+
+[Parallel Search MCP](https://docs.parallel.ai/integrations/mcp/search-mcp)
+provides `web_search` and `web_fetch` with free, anonymous access for exploration
+and light use. Anonymous search uses Fast mode and has rate limits. No Parallel
+API key or LLM API key is needed for this example.
+
+From the repository root, install Laddr in a fresh environment and run:
+
+```bash
+python -m venv .venv
+.venv/bin/python -m pip install ./lib/laddr
+.venv/bin/python examples/parallel_search.py
+```
+
+If your network requires an environment proxy, add `--trust-env` to use
+`HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`. The default aiohttp transport ignores environment
+proxy settings by default. Only enable this option with trusted proxy settings.
+
+The example uses an in-memory queue, SQLite database and cache, a no-op LLM, and
+no external tracing or storage. It passes this provider in the agent's `tools`
+list, then calls `parallel_web_search` and `parallel_web_fetch` through
+`CoreAgent.call_tool`, including tool discovery, registration and input validation:
+
+```python
+from laddr import MCPToolProvider
+
+parallel = MCPToolProvider(
+    url="https://search.parallel.ai/mcp",
+    transport="streamable-http",
+    server_name="parallel",
+    # trust_env=True,  # Optional environment proxy support
+)
+```
+
+Use `tools=[parallel]` on your own agent to opt in. Other agents and existing
+provider choices are unaffected. The provider prefixes tool names with
+`parallel_` to avoid collisions and does not read a Parallel key from the environment.
+
+The runnable example searches for Python TaskGroup behavior and fetches the
+Python documentation, printing source URLs and relevant excerpts as JSON. You
+can supply `--objective`, `--query`, and `--url` to research another topic. It
+uses one generated session ID for both tool calls and disconnects on exit.
+These are explicit agent tool calls, not an autonomous LLM loop or a synthesized
+answer. To let an LLM select the tools, configure your agent's usual LLM backend
+and run it through Laddr's normal agent runner; inference costs are separate
+from free search access.
